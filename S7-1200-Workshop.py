@@ -71,7 +71,7 @@ def parseArgs():
     parser.add_argument('-p', metavar='port', help="Target Port to use (default 102)", type=int, default=102)
     parser.add_argument('-r', help="Read values", action='store_true')
     parser.add_argument('-o', metavar='outputs', help="Set Outputs (e.g. 00000000)")
-    parser.add_argument('-m', metavar='merkers,<offset>', help="Set Merkers with offset (e.g. 10101010,230)")
+    parser.add_argument('-m', metavar='merkers,<offset>', help="Set Merkers with offset (e.g. 10101010,3 to set merkers 3.0 through 3.7)")
     args = parser.parse_args()
     sIP = args.t.split(':')[0]
     if not isIpv4(sIP): finish('Error: Wrong IP, please go read RFC 791 and then use a legitimate IPv4 address.')
