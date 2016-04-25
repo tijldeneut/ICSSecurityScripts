@@ -4,7 +4,8 @@
     # Date: 2015-10-22
     # Exploit Author: Photubias - tijl[dot]deneut[at]howest[dot]be, based on work by Frank Lycops (frank.lycops@thesecurityfactory.be)
     # Vendor Homepage: https://www.beckhoff.com/english.asp?embedded_pc/cx9020.htm
-    # Version: TwinCat UpnpWebsite < 3.1.4018.13, fixed with ftp://ftp.beckhoff.com/software/embPC-Control/CX90xx/CX9020/CE/TC3/CX9020_CB3011_WEC7_HPS_v602i_TC31_B4018.13.zip
+    # Vendor Homepage: https://www.beckhoff.com/english/industrial_pc/cp6606.htm
+    # Version: TwinCat UpnpWebsite < 3.1.4018.13, fixed with ftp://ftp.beckhoff.com/software/embPC-Control/CX90xx/CX9020/CE/TC3/_History/CX9020_CB3011_WEC7_HPS_v602i_TC31_B4018.13.zip
     # Tested on: Python runs on any Windows or Linux
     # CVE : CVE-2015-4051 (similar to this CVE, but different service IPC Diagnostics Authentication <> Web Authentication)
 
@@ -27,7 +28,7 @@
 
 File name CX9020-WebControl.py
 written by tijl[dot]deneut[at]howest[dot]be
-This POC allows to reboot any CX9020 PLC and add random (Web) users to be configured.
+This POC allows to reboot any CX9020 PLC and CP6606 HMI and add random (Web) users to be configured.
  -> Test by going to http://<IP>/config (redirects to http://<NAME>:5120/UpnpWebsite/index.htm)
  -> Default credentials are guest/1 and webguest/1, but this exploit works without credentials
  -> Verify Website version by logging into http://<IP>/config and clicking "TwinCAT"
