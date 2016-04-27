@@ -513,7 +513,7 @@ def getS7GetCoils(ip):
         s7Items = s7Data[28:28 + datalength*2]
         if not s7Items[:2] == 'ff': finish('Some error occured with S7Comm Data Read, full S7Comm data: ' + str(s7Data) + '\nFirmware not supported?\n')
     
-        print('       ###--- ' + sWhat + ' ---###')
+        print('     ###--- ' + sWhat + ' ---###')
         sToShow = [''] * 8
         for i in range(0,4):
             iOffset1 = (4 - i) * -2
@@ -630,17 +630,16 @@ def manageOutputs(device):
                 print('S7Comm (Siemens) detected, getting outputs...')
                 getS7GetCoils(device['ip_address'])
                 ans = raw_input('Do you want to alter outputs, memory or Not? [o/m/N]: ')
-                if ans.lower() == 'o' or ans.lower() == 'm':
-                    if ans.lower() == 'o': sType = 'outputs'
-                    else: sType = 'memory merkers'
-                    array = raw_input('What ' + sType + ' to set please? [00000000]: ')
-                    ## Send to device
-                    if ans.lower() == 'o':
-                        setOutputs(device['ip_address'], 102, array)
-                        status = 'Output has been send to device, verifying results: '
-                    else:
-                        setMerkers(device['ip_address'], 102, array)
-                        status = 'Merkers have been send to device, verifying results: '
+                if ans.lower() == 'o':
+                    array = raw_input('What outputs to set please? [00000000]: ')
+                    setOutputs(device['ip_address'], 102, array)
+                    status = 'Output has been send to device, verifying results: '
+                if ans.lower() == 'm':
+                    array = raw_input('What memory merkers + offset to set please? [00000000,0]: ')
+                    offset = int(array.split(',')[1])
+                    array = array.split(',')[0]
+                    setMerkers(device['ip_address'], 102, array, offset)
+                    status = 'Merkers have been send to device, verifying results: '
                     
                 if ans.lower() == 'n' or ans.lower() == '': return 0
             else: return 1
@@ -822,8 +821,8 @@ for packet in receivedDataArr:
     hexdata = hexlify(bytearray(packet))[28:] # take off ethernet header
     ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
     ##  takes 'translate' as a parameter, which will add these parsings:
-    # (vendor id 002a == siemens) (device id 0a01=switch, 0202=simulator, 0203=s7-300 CP, 0101=s7-300 ...)
-    # (0x01==IO-Device, 0x02==IO-Controller, 0x04==IO-Multidevice, 0x08==PN-Supervisor), (0000 0001, 0000 0010, 0000 0100, 0000 1000)
+    ##   (vendor id 002a == siemens) (device id 0a01=switch, 0202=simulator, 0203=s7-300 CP, 0101=s7-300 ...)
+    ##   (0x01==IO-Device, 0x02==IO-Controller, 0x04==IO-Multidevice, 0x08==PN-Supervisor), (0000 0001, 0000 0010, 0000 0100, 0000 1000)
     ## Getting MAC address from packet, formatting with ':' in between 
     mac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet))[6*2:12*2])))[:-1]
     result = parseResponse(hexdata, mac)
@@ -833,7 +832,7 @@ for packet in receivedDataArr:
     print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(mac, devicename, result['type_of_station'], result['ip_address'], result['vendor_id']))
 
 ## Finished the scanning part, now the changing part
-raw_input('Press ENTER to clear screen and continue with these ' + str(len(deviceArr)) + ' devices.')
+#raw_input('Press ENTER to clear screen and continue with these ' + str(len(deviceArr)) + ' devices.')
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('      ###--- DEVICELIST ---###')
