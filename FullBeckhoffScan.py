@@ -27,7 +27,7 @@
         It also performs detailed scanning using ADS, followed by controlling the
         Twincat service.
 '''
-import sys, os, binascii, socket, subprocess
+import sys, os, binascii, socket, subprocess, time
 iTimeout=1 ## Seconds, waittime for answers
 
 def send_and_recv(s, packet):
@@ -74,48 +74,38 @@ def getDevices(LHOST,LNETID,iTimeout):
     sock.close()
     arrDevices=[]
     for data in receivedData:
-        data, addr = data
-        hexdata = binascii.hexlify(data)
-        deviceid = data[28:38]
-        '''
-        amsnetid = str(int(hexdata[24:26],16))+'.'+str(int(hexdata[26:28],16))+'.'
-        amsnetid += str(int(hexdata[28:30],16))+'.'+str(int(hexdata[30:32],16))+'.'
-        amsnetid += str(int(hexdata[32:34],16))+'.'+str(int(hexdata[34:36],16))
-        '''
-        FirstNetID = int(hexdata[24:26],16)
-        if deviceid != '':
-            if FirstNetID != 5:
-                print('PC Found, but not adding:')
-                print(data)
-            else:
-                arrDevices.append((addr[0],data[28:37],hexdata[24:36]))
-    return arrDevices
+        data,ip=data
+        hexdata=binascii.hexlify(data)
+        netid=hexdata[24:36]
+        twincatversion=str(int(hexdata[-8:-6]))+'.'+str(int(hexdata[-6:-4]))+'.'+str(int(hexdata[-2:]+hexdata[-4:-2],16))
+        namelength=int(hexdata[54:56]+hexdata[52:54],16)
+        name=data[28:27+namelength]
+        kernelstart=hexdata.split('14011401')[1]
+        kernel=str(int(kernelstart[4:6]))+'.'+str(int(kernelstart[12:14]))+'.'+str(int(kernelstart[22:24]+kernelstart[20:22],16))
+        if name!='':
+            arrDevices.append({'IP':ip[0],'NAME':name,'RNETID':netid,'TCVER':twincatversion,'WINVER':kernel})
+    return arrDevices ## Array of devices[ip, name, netid, twincatversion, kernel]
 
-def getState(RHOST,RNETID,LNETID):
+def getState(device,LNETID):
     ## ADS Read State Request
     s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    s.connect((RHOST,48898))
+    s.connect((device['IP'],48898))
     s.settimeout(iTimeout)
     
-    packet='000020000000'+RNETID+'1027'+LNETID+'018004000400000000000000000009000000'
-    try:
-        resp=binascii.hexlify(send_and_recv(s, packet))
-    except:
-        resp=''
+    packet='000020000000'+device['RNETID']+'1027'+LNETID+'018004000400000000000000000009000000'
+    try: resp=binascii.hexlify(send_and_recv(s, packet))
+    except: resp=''
     s.close()
     if len(resp)>0:
-        if resp[-8:-6]=='06':
-            return 'STOP'
-        elif resp[-8:-6] == '0f':
-            return 'CONFIG'
-        else:
-            return 'RUN'
+        if resp[-8:-6]=='06': return 'STOP'
+        elif resp[-8:-6] == '0f': return 'CONFIG'
+        else: return 'RUN'
     else:
         return 'ERROR'
 
-def verifyDevice(RHOST,RNETID,LNETID):
+def verifyDevice(device,LHOST,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    state=getState(RHOST,RNETID,LNETID)
+    state=getState(device,LNETID)
     if state=='RUN':
         print('Device is reachable and Twincat is running')
     elif state=='CONFIG':
@@ -124,16 +114,27 @@ def verifyDevice(RHOST,RNETID,LNETID):
         print('Device is reachable and Twincat is stopped')
     else:
         print('Device unreachable. Please add remote route!')
+        ans=raw_input('Do you want to add one now? [y/N]: ').lower()
+        if ans=='y': 
+            addRoute(device,LHOST,LNETID)
+        return state
     raw_input('Press [Enter] to continue')
     return state
 
-def addRoute(RHOST,RNETID,LHOST,LNETID,devicename):
+def addRoute(device,LHOST,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    if not getState(RHOST,RNETID,LNETID)=='ERROR':
+    user = passw = ''
+    if not getState(device,LNETID)=='ERROR':
         print('Device seems reachable, sure to add a route?')
         ans=raw_input('Please type \'Y\' to do so [y/N]: ')
         if not ans.lower()=='y': return
-    print('\nAdding route on '+devicename+' ('+RHOST+')')
+    if not device['WINVER'].split('.')[1]=='0':
+        print('Device is running non Windows CE (kernel '+device['WINVER']+'), correct credentials needed:')
+        user=raw_input('Device username [guest]: ')
+        passw=raw_input('Device password [1]: ')
+    if user=='': user='guest'
+    if passw=='': passw='1'
+    print('\nAdding route on '+device['NAME']+' ('+device['IP']+')')
     routename=socket.gethostname()
     ans=raw_input('Use default route name ('+routename+')? [Y/n]: ')
     if ans=='': ans='y'
@@ -142,21 +143,24 @@ def addRoute(RHOST,RNETID,LHOST,LNETID,devicename):
     udpsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udpsock.settimeout(iTimeout)
     udpsock.bind((LHOST,0))
-    ## Route has password (here user user, pass pass, can be encrypted as it is here)
-    ##packet = '036614710000000006000000 ac1001200101 1027050000000c001000 46494354494c452d5457494e43415400 07000600 ac1001200101 0f001000 e370a17abbd8a6d96df71323a4497c1f 0e001000 4b425533727b8f53352e7a16c5db3ec1 05000c00 3137322e32302e302e353000'
-    ##static, LNETID, static+length, hostname+nullbyte (FICTILE-TWINCAT), static, LNETID, static+length, 'user' encoded, static+length, pass+nullbyte, static, LHOST+nullbyte
-    
     ## This Route has same credentials (user/pass), but not encrypted:
-    ##packet = '036614710000000006000000 ac1001200101 1027050000000c001000 46494354494c452d5457494e43415400 07000600 ac1001200101 0d000500 7573657200 02000500 7061737300 05000c00 3137322e32302e302e353000'
-    ##static, LNETID, static+length, hostname+nullbyte (FICTILE-TWINCAT), static, LNETID, static+length, user+nullbyte, static+length, pass+nullbyte, static, LHOST+nullbyte
+    ##packet = '036614710000000006000000 ac1001200101 1027 050000000c001000 46494354494c452d5457494e43415400 07000600 ac1001200101 0d000500 7573657200 02000500 7061737300 05000c00 3137322e32302e302e353000'
+    ##static, LNETID, static+length, hostname+nullbyte (FICTILE-TWINCAT), static, LNETID, static+length, user+nullbyte, static+length, pass+nullbyte, static+length, LHOST+nullbyte
 
-    namelength = hex(1+len(routename))[2:].zfill(2)
-    routenamehex = binascii.hexlify(routename)
+    namelength=hex(1+len(routename))[2:].zfill(2)
+    routenamehex=binascii.hexlify(routename)
+    userlength=hex(1+len(user))[2:].zfill(2)
+    userhex=binascii.hexlify(user)
+    passlength=hex(1+len(passw))[2:].zfill(2)
+    passhex=binascii.hexlify(passw)
+    lhostlength=hex(1+len(LHOST))[2:].zfill(2)
+    lhosthex=binascii.hexlify(LHOST)
 
-    packet = '036614710000000006000000 '+LNETID+' 1027050000000c00 '+namelength+' 00 '+routenamehex+'00 07000600 '+LNETID+'0d000500 7573657200 02000500 7061737300 05000c00'+binascii.hexlify(LHOST)+'00'
+    packet='036614710000000006000000'+LNETID+'1027050000000c00'+namelength+'00'+routenamehex+'00 07000600'+LNETID
+    packet+='0d00'+userlength+'00'+userhex+'00 0200'+passlength+'00'+passhex+'00 0500'+lhostlength+'00'+lhosthex+'00'
    
-    print('Adding route '+routename+' for '+LHOST+' with credentials user/pass')
-    send_only(udpsock, RHOST, 48899, packet)
+    print('Adding route '+routename+' for '+LHOST+' with credentials '+user+'/'+passw)
+    send_only(udpsock, device['IP'], 48899, packet)
     resp = recv_only(udpsock)
     hexdata = binascii.hexlify(resp[0])
     amsnetid = str(int(hexdata[24:26],16))+'.'+str(int(hexdata[26:28],16))+'.'
@@ -168,13 +172,13 @@ def addRoute(RHOST,RNETID,LHOST,LNETID,devicename):
     raw_input('Press [Enter] to continue')
     return
 
-def getRemoteRoutes(s,RNETID,LNETID,showme=True):
+def getRemoteRoutes(s,device,LNETID,showme=True):
     ## Just keep requesting routes untill there is no answer
     returnarr = []
     i=0
     while i>=0:
         ## IndexID, first route is '0', second is '1' etc...
-        packet = '00002c000000' + RNETID + '1027' + LNETID + '9f80 0200 04000c00000000000000 '+str(i+30)+'000000 23030000 0'+str(i)+'000000 00080000'
+        packet = '00002c000000' + device['RNETID'] + '1027' + LNETID + '9f80 0200 04000c00000000000000 '+str(i+30)+'000000 23030000 0'+str(i)+'000000 00080000'
         resp = send_and_recv(s, packet)
         
         if len(resp)<2094:
@@ -193,19 +197,22 @@ def getRemoteRoutes(s,RNETID,LNETID,showme=True):
             i += 1
     return returnarr
 
-def delRoute(RHOST,RNETID,LHOST,LNETID):
+def delRoute(device,LHOST,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    if getState(RHOST,RNETID,LNETID)=='ERROR':
+    if getState(device,LNETID)=='ERROR':
         print('Device unreachable. Please add remote route!')
         raw_input('Press [Enter] to continue')
         return
     
     s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    s.connect((RHOST,48898))
+    s.connect((device['IP'],48898))
     s.settimeout(iTimeout)
     bMyRoute=False
-    
-    arrRouteNames = getRemoteRoutes(s,RNETID,LNETID,False)
+
+    print('Hold on, receiving...')
+    time.sleep(1)
+    os.system('cls' if os.name == 'nt' else 'clear')
+    arrRouteNames=getRemoteRoutes(s,device,LNETID,False)
     i=1
     for route in arrRouteNames:
         print('['+str(i)+'] '+route[0]+' ('+route[1]+')')
@@ -229,13 +236,13 @@ def delRoute(RHOST,RNETID,LHOST,LNETID):
     totallength=hex(45+len(routename))[2:].zfill(2)
     print
     print('Deleting Route "'+routename+'"')
-    packet = '0000 '+totallength+' 000000 '+RNETID+' 1027 '+LNETID+' ce80 0300 0400 '+datalength+'000000 00000000 38000000 22030000 00000000 '+namelength+'000000 '+routenamehex+'00'
+    packet = '0000 '+totallength+' 000000 '+device['RNETID']+' 1027 '+LNETID+' ce80 0300 0400 '+datalength+'000000 00000000 38000000 22030000 00000000 '+namelength+'000000 '+routenamehex+'00'
 
     try:
         resp = send_and_recv(s,packet)
         s.close()
         if bMyRoute:
-            if getState(RHOST,RNETID,LNETID)=='ERROR': print('Successful!')
+            if getState(device,LNETID)=='ERROR': print('Successful!')
             else: print('There was an error')
         else:
             if binascii.hexlify(resp)[-8:]=='00000000': print('Successful!')
@@ -246,18 +253,21 @@ def delRoute(RHOST,RNETID,LHOST,LNETID):
     raw_input('Press [Enter] to continue')
     return
 
-def getInfo(RHOST,RNETID,LNETID):
+def getInfo(device,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    if getState(RHOST,RNETID,LNETID)=='ERROR':
+    '''
+    if getState(device,LNETID)=='ERROR':
         print('Device unreachable. Please add remote route!')
         raw_input('Press [Enter] to continue')
         return
+    '''
     
     s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    s.connect((RHOST,48898))
+    s.settimeout(iTimeout)
+    s.connect((device['IP'],48898))
     import xml.etree.ElementTree as ET
     ##ADS Read Request (extensive, invokeid 0x26, indexgroup 0x2bc, offset 0x1, cblength 0x240,d576)
-    packet = '00002c000000'+RNETID+'1027'+LNETID+'8f80 0200 0400 0c000000 00000000 26000000 bc020000 01000000 40020000'
+    packet = '00002c000000'+device['RNETID']+'1027'+LNETID+'8f80 0200 0400 0c000000 00000000 26000000 bc020000 01000000 40020000'
     ## Has: TargetType, TargetVersion (Version, Revision, Build), TargetFeatures (NetId), Hardware (Model, SerialNo, CPUVersion, Date, CPUArchitecture)
     ##        OsImage (ImageDevice, ImageVersion, ImageLevel, OsName, OsVersion)
     ## Example:
@@ -278,18 +288,18 @@ def getInfo(RHOST,RNETID,LNETID):
     print('OSImage: Device='+root[4][0].text+', Version='+root[4][1].text+', Level='+root[4][2].text+', OsName='+root[4][3].text+', OsVersion='+root[4][4].text)
     print
     print('      ###--- DEVICE REMOTE ROUTES ---###')
-    getRemoteRoutes(s,RNETID,LNETID)
+    getRemoteRoutes(s,device,LNETID)
     print
     s.close()
-    state=getState(RHOST,RNETID,LNETID)
+    state=getState(device,LNETID)
     print('      ###--- TWINCAT SERVICE ---###')
     print('Twincat is currently in '+state+' mode')
     print
     raw_input('Press [Enter] to continue')
 
-def setTwincat(RHOST,RNETID,LNETID):
+def setTwincat(device,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    state=getState(RHOST,RNETID,LNETID)
+    state=getState(device,LNETID)
     print('      ###--- TWINCAT SERVICE ---###')
     print('Twincat is currently in '+state+' mode')
     print
@@ -298,18 +308,19 @@ def setTwincat(RHOST,RNETID,LNETID):
     print('[3] CONFIG')
     print('[C] Cancel')
     answer=raw_input('Which mode you want to restart Twincat? [C]: ').lower()
-    if answer=='' or not answer.isdigit() or int(answer)>=3 or answer=='c': return
+    if answer=='' or not answer.isdigit() or int(answer)>3 or answer=='c': return
     s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    s.connect((RHOST,48898))
+    s.settimeout(2*iTimeout)
+    s.connect((device['IP'],48898))
     if answer=='1':
         print('## (Re)Start in RUN') ## 0200
-        packet = '000028000000 '+RNETID+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 0200 000000000000'
-    elif answer=='3':
-        print('## (Re)Start in CONFIG') ## 1000
-        packet = '000028000000 '+RNETID+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 1000 000000000000'
+        packet = '000028000000 '+device['RNETID']+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 0200 000000000000'
     elif answer=='2':
         print('## STOP Twincat') ## 0600
-        packet = '000028000000 '+RNETID+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 0600 000000000000'
+        packet = '000028000000 '+device['RNETID']+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 0600 000000000000'
+    elif answer=='3':
+        print('## (Re)Start in CONFIG') ## 1000
+        packet = '000028000000 '+device['RNETID']+' 1027 '+LNETID+'a780 0500 040008000000000000000d050000 1000 000000000000'
     try:
         resp = binascii.hexlify(send_and_recv(s,packet))
         print('Successful!')
@@ -328,8 +339,8 @@ for ip in arrInterfaces:
     print('['+str(i)+'] '+ip)
     i+=1
 print('[Q] Quit now')
-answer=raw_input('Please select the adapter [1]: ')
-#answer='2'
+if i>2: answer=raw_input('Please select the adapter [1]: ')
+else: answer=str(i-1)
 if answer.lower()=='q': exit()
 if answer=='' or not answer.isdigit() or int(answer)>=i: answer=1
 LHOST=arrInterfaces[int(answer)-1]
@@ -337,7 +348,7 @@ LNETID=hex(int(LHOST.split('.')[0]))[2:].zfill(2) + hex(int(LHOST.split('.')[1])
 LNETID+=hex(int(LHOST.split('.')[2]))[2:].zfill(2) + hex(int(LHOST.split('.')[3]))[2:].zfill(2) + '0101'
 
 os.system('cls' if os.name == 'nt' else 'clear')
-## Get Devicelist (array of 'IP', 'Name', 'AMSNetID')
+## Get Devicelist (array of 'IP', 'Name', 'AMSNetID', 'Twincatversion', 'Kernelbuild')
 arrDevices=getDevices(LHOST,LNETID,iTimeout)
 if len(arrDevices)==0:
     print('No devices found, stopping')
@@ -350,10 +361,10 @@ while True:
     print('      ###--- DEVICELIST ---###')
     i=1
     for device in arrDevices:
-        amsnetid = str(int(device[2][:2],16))+'.'+str(int(device[2][2:4],16))+'.'
-        amsnetid += str(int(device[2][4:6],16))+'.'+str(int(device[2][6:8],16))+'.'
-        amsnetid += str(int(device[2][8:10],16))+'.'+str(int(device[2][10:12],16))
-        print('['+str(i)+'] '+device[0]+' ('+device[1]+', '+amsnetid+')')
+        amsnetid = str(int(device['RNETID'][:2],16))+'.'+str(int(device['RNETID'][2:4],16))+'.'
+        amsnetid += str(int(device['RNETID'][4:6],16))+'.'+str(int(device['RNETID'][6:8],16))+'.'
+        amsnetid += str(int(device['RNETID'][8:10],16))+'.'+str(int(device['RNETID'][10:12],16))
+        print('['+str(i)+'] '+device['IP']+' ('+device['NAME']+', '+amsnetid+', '+device['WINVER']+')')
         i+=1
     print('[Q] Quit now')
     answer=raw_input('Please select the device [1]: ')
@@ -363,7 +374,8 @@ while True:
     ## Device Menu
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        print('###--- MAIN MENU ---###')
+        print('###--- MAIN MENU FOR '+device['NAME']+' ---###')
+        print('Kernel: '+device['WINVER']+'\n')
         print('[T] Verify connectivity')
         print('[L] List more information, including routes')
         print('[A] Add Route')
@@ -373,11 +385,11 @@ while True:
         print('[O] Choose other device')
         print('[Q] Quit now')
         print
-        answer2 = raw_input('Please select what you want to do with ' + device[1] + ' (' + device[0] + ')' + ' [T]: ')
+        answer2 = raw_input('Please select what you want to do with ' + device['NAME'] + ' (' + device['IP'] + ')' + ' [T]: ')
         if answer2.lower()=='q': exit()
-        if answer2.lower()=='l': getInfo(device[0],device[2],LNETID)
-        if answer2.lower()=='a': addRoute(device[0],device[2],LHOST,LNETID,device[1])
-        if answer2.lower()=='d': delRoute(device[0],device[2],LHOST,LNETID)
-        if answer2.lower()=='c': setTwincat(device[0],device[2],LNETID)
+        if answer2.lower()=='l': getInfo(device,LNETID)
+        if answer2.lower()=='a': addRoute(device,LHOST,LNETID)
+        if answer2.lower()=='d': delRoute(device,LHOST,LNETID)
+        if answer2.lower()=='c': setTwincat(device,LNETID)
         if answer2.lower()=='o': break
-        if answer2.lower()=='t' or answer2=='': verifyDevice(device[0],device[2],LNETID)
+        if answer2.lower()=='t' or answer2=='': verifyDevice(device,LHOST,LNETID)
