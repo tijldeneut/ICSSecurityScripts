@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 '''
-	Copyright 2016 Photubias(c)
+	Copyright 2019 Photubias(c)
 
 	Written for Howest(c) University College, Ghent University, XiaK
 
@@ -81,7 +81,10 @@ def getDevices(LHOST,LNETID,iTimeout):
         namelength=int(hexdata[54:56]+hexdata[52:54],16)
         name=data[28:27+namelength]
         kernelstart=hexdata.split('14011401')[1]
-        kernel=str(int(kernelstart[4:6]))+'.'+str(int(kernelstart[12:14]))+'.'+str(int(kernelstart[22:24]+kernelstart[20:22],16))
+        try:
+            kernel=str(int(kernelstart[4:6]))+'.'+str(int(kernelstart[12:14]))+'.'+str(int(kernelstart[22:24]+kernelstart[20:22],16))
+        except:
+            kernel='Unknown'
         if name!='':
             arrDevices.append({'IP':ip[0],'NAME':name,'RNETID':netid,'TCVER':twincatversion,'WINVER':kernel})
     return arrDevices ## Array of devices[ip, name, netid, twincatversion, kernel]
