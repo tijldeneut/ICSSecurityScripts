@@ -299,15 +299,18 @@ def getInfo(device,LNETID):
         ## <Hardware><Model>CB3011-0001-M900</Model><SerialNo>2215923-001</SerialNo><CPUVersion>2.2</CPUVersion><Date>25.11.15</Date><CPUArchitecture>5</CPUArchitecture></Hardware>
         ## <OsImage><ImageDevice>CB3011</ImageDevice><ImageVersion>6.02e</ImageVersion><ImageLevel>HPS</ImageLevel><OsName>Windows CE</OsName><OsVersion>7.0</OsVersion></OsImage>
         resp = send_and_recv(s, packet)[46:-1]
+        
+        try:
+            root = ET.fromstring(resp)
 
-        root = ET.fromstring(resp)
-
-        print('TargetType: '+root[0].text)
-        print('TargetVersion: '+root[1][0].text+'.'+root[1][1].text+'.'+root[1][2].text)
-        print('TargetFeatures (NetId): '+root[2][0].text)
-        print('Hardware: Model='+root[3][0].text+', Serial='+root[3][1].text+', Version='+root[3][2].text+', Date='+root[3][3].text+', Architecture='+root[3][4].text)
-        print('OSImage: Device='+root[4][0].text+', Version='+root[4][1].text+', Level='+root[4][2].text+', OsName='+root[4][3].text+', OsVersion='+root[4][4].text)
-        print
+            print('TargetType: '+root[0].text)
+            print('TargetVersion: '+root[1][0].text+'.'+root[1][1].text+'.'+root[1][2].text)
+            print('TargetFeatures (NetId): '+root[2][0].text)
+            print('Hardware: Model='+root[3][0].text+', Serial='+root[3][1].text+', Version='+root[3][2].text+', Date='+root[3][3].text+', Architecture='+root[3][4].text)
+            print('OSImage: Device='+root[4][0].text+', Version='+root[4][1].text+', Level='+root[4][2].text+', OsName='+root[4][3].text+', OsVersion='+root[4][4].text)
+            print
+        except:
+            pass
     print('OS Version: '+device['WINVER'])
     print('Based on the devicename ('+device['NAME']+'), ')
     print('   the MAC Address could be: 00-01-05-'+device['NAME'][-6:-4]+'-'+device['NAME'][-4:-2]+'-'+device['NAME'][-2:])
