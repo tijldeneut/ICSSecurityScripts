@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 '''
-	Copyright 2015 Photubias(c)
+	Copyright 2019 Photubias(c)
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -153,7 +153,8 @@ def getAllInterfaces():
         proc=Popen("for i in $(ip address | grep -v \"lo\" | grep \"default\" | cut -d\":\" -f2 | cut -d\" \" -f2);do echo $i $(ip address show dev $i | grep \"inet \" | cut -d\" \" -f6 | cut -d\"/\" -f1) $(ip address show dev $i | grep \"ether\" | cut -d\" \" -f6);done", shell=True, stdout=PIPE)
         for interface in proc.stdout.readlines():
             intarr = interface.split(' ')
-            interfaces = addToArr(interfaces, intarr[0], intarr[1], intarr[2].replace('\n',''), '', '')
+            try: interfaces = addToArr(interfaces, intarr[0], intarr[1], intarr[2].replace('\n',''), '', '')
+            except: continue
 
     return interfaces
 
