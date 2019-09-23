@@ -236,7 +236,7 @@ def receiveRawPackets(npfdevice, timeout, srcmac, ethertype, stopOnReceive=False
     while receivedpacket >= 0:
         timeleft = int(round(timer - time.time(), 0))
         status("Received packets: %s, time left: %i  \r" % (str(i), timeleft))
-        if receivedpacket == 0 or timeleft == 0:
+        if receivedpacket == 0 or timeleft <= 0:
             # PCAP networkstack timeout elapsed or regular timeout
             break
         rawdata = pkt_data[0:header.contents.len]
