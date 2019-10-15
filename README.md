@@ -8,3 +8,5 @@ Industrial Security Scripts
 * S7-1200-Workshop.py: Very simple script for reading inputs and setting outputs and merkers of for Siemens S7-1200 (firmware <= v3) 
 * FullSiemensScan.py: Elaborate script for scanning AND hacking Siemens PLCs (and more ;-) When using NPCAP, make sure to install it in WinPCAP compatible mode
 * Schneider-Scanner.py: Simple Broadcast scanner for Schneider PLCs
+* Mitsubishi: Simple Broadcast scanner for Mitsubishi PLCs, together with a broadcast State Changer for Mitsubishi
+* Beckhoff ADS Pwner & Route Spoofer: More details coming later (should've attended BruCON 0x0B ;-)
