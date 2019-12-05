@@ -10,3 +10,4 @@ Industrial Security Scripts
 * Schneider-Scanner.py: Simple Broadcast scanner for Schneider PLCs
 * Mitsubishi: Simple Broadcast scanner for Mitsubishi PLCs, together with a broadcast State Changer for Mitsubishi
 * Beckhoff ADS Pwner & Route Spoofer: More details coming later (should've attended BruCON 0x0B ;-)
+* S7-300_password.py : Decrypt and Encrypt PLC passwords (captured while sniffing)
