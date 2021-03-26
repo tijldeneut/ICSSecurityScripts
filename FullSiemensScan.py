@@ -213,7 +213,8 @@ def sendRawPacket(bNpfdevice, sEthertype, sSrcmac, boolSetNetwork = False, sNetw
     bufErrbuf = create_string_buffer(256)
     handlePcapDev = pcap_open_live(bNpfdevice, 65535, 1, 1000, bufErrbuf) ## Device, max packet size, promiscuous mode, time limit in ms, buffer for errors
     if not bool(handlePcapDev):
-        print('\nUnable to open the adapter. %s is not supported by Pcap\n' % interfaces[int(answer - 1)][0])
+        print('\nError: Please use sudo!\n')
+        #else: print('\nUnable to open the adapter. %s is not supported by Pcap\n' % interfaces[int(answer - 1)][0])
         sys.exit(1)
 
     if pcap_sendpacket(handlePcapDev, arrBytePacket, len(arrBytePacket)) != 0:
