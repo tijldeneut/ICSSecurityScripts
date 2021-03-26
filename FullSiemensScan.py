@@ -1,6 +1,6 @@
-#! /usr/bin/env python2
-'''
-	Copyright 2019 Photubias(c)
+#! /usr/bin/env python3
+r'''
+	Copyright 2021 Photubias(c)
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
         Prerequisites: WinPcap (Windows) or libpcap (Linux) installed
         
         File name SiemensScan.py
-        written by tijl[dot]deneut[at]howest[dot]be
+        written by tijl[dot]deneut[at]howest[dot]be for IC4
         --- Profinet Scanner ---
         It will perform a Layer2 discovery scan (PN_DCP) for Profinet devices,
         then list their info (detected only via DCP)
@@ -78,18 +78,19 @@ class pcap_pkthdr(Structure):
 ##### Initialize Pcap
 if os.name == 'nt':
     try:
+        os.chdir('C:/Windows/System32/Npcap')
         _lib = CDLL('wpcap.dll')
     except:
-        print('Error: WinPcap not found!')
+        print('Error: WinPcap/Npcap not found!')
         print('Please download here: https://www.winpcap.org/install')
-        raw_input('Press [Enter] to close')
+        input('Press [Enter] to close')
         sys.exit(1)
 else:
     pcaplibrary = find_library('pcap')
     if pcaplibrary == None or str(pcaplibrary) == '':
         print('Error: Pcap library not found!')
         print('Please install with: e.g. apt-get install libpcap0.8')
-        raw_input('Press [Enter] to close')
+        input('Press [Enter] to close')
         sys.exit(1)
     _lib = CDLL(pcaplibrary)
 
@@ -97,11 +98,15 @@ else:
 pcap_findalldevs = _lib.pcap_findalldevs
 pcap_findalldevs.restype = c_int
 pcap_findalldevs.argtypes = [POINTER(POINTER(pcap_if)), c_char_p]
-## match DLL function to open a device
+## match DLL function to open a device: char *device, int snaplen, int prmisc, int to_ms, char *ebuf
+##  snaplen - maximum size of packets to capture in bytes
+##  promisc - set card in promiscuous mode?
+##  to_ms   - time to wait for packets in miliseconds before read times out
+##  errbuf  - if something happens, place error string here
 pcap_open_live = _lib.pcap_open_live
 pcap_open_live.restype = POINTER(c_void_p)
 pcap_open_live.argtypes = [c_char_p, c_int, c_int, c_int, c_char_p]
-## match DLL function to send a raw packet
+## match DLL function to send a raw packet: pcap device handle, packetdata, packetlength
 pcap_sendpacket = _lib.pcap_sendpacket
 pcap_sendpacket.restype = c_int
 pcap_sendpacket.argtypes = [POINTER(c_void_p), POINTER(c_ubyte), c_int]
@@ -118,6 +123,8 @@ pcap_next_ex = _lib.pcap_next_ex
 pcap_next_ex.restype = c_int
 pcap_next_ex.argtypes = [POINTER(c_void_p), POINTER(POINTER(pcap_pkthdr)), POINTER(POINTER(c_ubyte))]
 
+##### Variables
+iDiscoverTimeout = 2
 
 ##### Functions
 def getAllInterfaces():
@@ -136,14 +143,14 @@ def getAllInterfaces():
     if os.name == 'nt': # This should work on Windows
         proc=Popen("getmac /NH /V /FO csv | FINDSTR /V disconnected", shell=True, stdout=PIPE)
         for interface in proc.stdout.readlines():
-            intarr = interface.split(',')
-            adapter = intarr[0].replace("\"","")
-            devicename = intarr[1].replace("\"","")
-            mac = intarr[2].replace("\"","").lower().replace("-",":")
-            winguid = intarr[3].replace("\"",'').replace('\n', '').replace('\r', '')[-38:]
-            proc = Popen("netsh int ip show addr \""+adapter+"\" | FINDSTR /I IP", shell=True, stdout=PIPE)
+            intarr = interface.decode().split(',')
+            adapter = intarr[0].replace('"','')
+            devicename = intarr[1].replace('"','')
+            mac = intarr[2].replace('"','').lower().replace('-',':')
+            winguid = intarr[3].replace('"','').replace('\n', '').replace('\r', '')[-38:]
+            proc = Popen('netsh int ip show addr "' + adapter + '" | FINDSTR /I IP', shell=True, stdout=PIPE)
             try:
-                ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].replace(" ",""))[0]
+                ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].replace(' ',''))[0]
             except:
                 ip = ''
             interfaces=addToArr(interfaces, adapter, ip, mac, devicename, winguid)
@@ -152,18 +159,18 @@ def getAllInterfaces():
         #proc=Popen("for i in `ifconfig -a | grep \"Link encap:\" | awk '{print $1}'`;do echo \"$i `ifconfig $i | sed 's/inet addr:/inet addr: /' | grep \"inet addr:\" | awk '{print $3}'` `ifconfig $i | grep HWaddr | awk '{print $5}'`\" | sed '/lo/d';done", shell=True, stdout=PIPE)
         proc=Popen("for i in $(ip address | grep -v \"lo\" | grep \"default\" | cut -d\":\" -f2 | cut -d\" \" -f2);do echo $i $(ip address show dev $i | grep \"inet \" | cut -d\" \" -f6 | cut -d\"/\" -f1) $(ip address show dev $i | grep \"ether\" | cut -d\" \" -f6);done", shell=True, stdout=PIPE)
         for interface in proc.stdout.readlines():
-            intarr = interface.split(' ')
-            try: interfaces = addToArr(interfaces, intarr[0], intarr[1], intarr[2].replace('\n',''), '', '')
-            except: continue
+            intarr = interface.decode().split(' ')
+            if len(intarr)<3: continue ## Device has no MAC address, L2 scanning not an option
+            interfaces = addToArr(interfaces, intarr[0], intarr[1], intarr[2].replace('\n',''), '', '')
 
     return interfaces
 
 ## Listing all NPF adapters and finding the correct one that has the Windows Devicename (\Device\NPF_{GUID})
 def findMatchingNPFDevice(windevicename):
     alldevs = POINTER(pcap_if)()
-    errbuf = create_string_buffer(256)
-    if pcap_findalldevs(byref(alldevs), errbuf) == -1:
-        print ("Error in pcap_findalldevs: %s\n" % errbuf.value)
+    bufErrbuf = create_string_buffer(256)
+    if pcap_findalldevs(byref(alldevs), bufErrbuf) == -1:
+        print('Error in pcap_findalldevs: %s\n' % bufErrbuf.value)
         sys.exit(1)
     pcapdevices = alldevs.contents
     while pcapdevices:
@@ -175,104 +182,101 @@ def findMatchingNPFDevice(windevicename):
             pcapdevices = False
     return ''
 
-## Expects hexstring like this 01020304050607 and returns bytearray
-def createPacket(string):
-    hexstring = unhexlify(string)
-    packet = (c_ubyte * len(hexstring))()
+## Expects sData like this 01020304050607 and returns bytearray
+def createPacket(sData):
+    bHexData = unhexlify(sData)
+    arrBytePacket = (c_ubyte * len(bHexData))()
     b = bytearray()
-    b.extend(hexstring)
-    for i in range(0,len(hexstring)):
-        packet[i] = b[i]
-    return packet
+    b.extend(bHexData)
+    for i in range(0,len(bHexData)): arrBytePacket[i] = b[i]
+    return arrBytePacket
 
 ## Actually sends a packet
-def sendRawPacket(npfdevice, ethertype, srcmac, setNetwork=False, networkDataToSet='', dstmac=''):
-    if ethertype == '88cc': # LLDP Packet
-        dstmac = '0180c200000e'
-        data = '0210077365727665722d6e6574776f726b6d040907706f72742d303031060200140a0f5345525645522d4e4554574f524b4d0c60564d776172652c20496e632e20564d77617265205669727475616c20506c6174666f726d2c4e6f6e652c564d776172652d34322033362036642039622034302062642038642038302d66302037362061312066302035332030392039352032370e040080008010140501ac101e660200000001082b0601040181c06efe08000ecf0200000000fe0a000ecf05005056b6feb6fe0900120f0103ec0300000000'
-    elif ethertype == '8100': # PN-DCP, Profinet Discovery Packet, ethertype '8100'
-        dstmac = '010ecf000000'
-        data = '00008892fefe05000400000300800004ffff00000000000000000000000000000000000000000000000000000000'
-    elif ethertype == '8892' and setNetwork:
+def sendRawPacket(bNpfdevice, sEthertype, sSrcmac, boolSetNetwork = False, sNetworkDataToSet = '', sDstmac = ''):
+    if sEthertype == '88cc': # LLDP Packet
+        sDstmac = '0180c200000e'
+        sData = '0210077365727665722d6e6574776f726b6d040907706f72742d303031060200140a0f5345525645522d4e4554574f524b4d0c60564d776172652c20496e632e20564d77617265205669727475616c20506c6174666f726d2c4e6f6e652c564d776172652d34322033362036642039622034302062642038642038302d66302037362061312066302035332030392039352032370e040080008010140501ac101e660200000001082b0601040181c06efe08000ecf0200000000fe0a000ecf05005056b6feb6fe0900120f0103ec0300000000'
+    elif sEthertype == '8100': # PN-DCP, Profinet Discovery Packet, sEthertype '8100'
+        sDstmac = '010ecf000000'
+        sData = '00008892fefe05000400000300800004ffff00000000000000000000000000000000000000000000000000000000'
+    elif sEthertype == '8892' and boolSetNetwork:
         ## Create packet to set networkdata, expect data in hexstring
-        data = ('fefd 04 00 04000001 0000 0012 0102 000e 0001' + networkDataToSet + '0000 0000 0000 0000 0000 0000').replace(' ','') # Working
-    elif ethertype == '8892' and not setNetwork:
+        sData = ('fefd 04 00 04000001 0000 0012 0102 000e 0001' + sNetworkDataToSet + '0000 0000 0000 0000 0000 0000').replace(' ','') # Working
+    elif sEthertype == '8892' and not boolSetNetwork:
         ## Create custom packet with 'networkDataToSet' as the data (including length) and dstmac as dstmac
-        data = networkDataToSet
+        sData = sNetworkDataToSet
 
     ## Get packet as a bytearray
-    packet = createPacket(dstmac + srcmac + ethertype + data)
+    arrBytePacket = createPacket(sDstmac + sSrcmac + sEthertype + sData)
 
     ## Send the packet
-    fp = c_void_p
-    errbuf = create_string_buffer(256)
-    fp = pcap_open_live(npfdevice, 65535, 1, 1000, errbuf)
-    if not bool(fp):
-        print("\nUnable to open the adapter. %s is not supported by Pcap\n" % interfaces[int(answer - 1)][0])
+    bufErrbuf = create_string_buffer(256)
+    handlePcapDev = pcap_open_live(bNpfdevice, 65535, 1, 1000, bufErrbuf) ## Device, max packet size, promiscuous mode, time limit in ms, buffer for errors
+    if not bool(handlePcapDev):
+        print('\nUnable to open the adapter. %s is not supported by Pcap\n' % interfaces[int(answer - 1)][0])
         sys.exit(1)
 
-    if pcap_sendpacket(fp, packet, len(packet)) != 0:
-        print ("\nError sending the packet: %s\n" % pcap_geterr(fp))
+    if pcap_sendpacket(handlePcapDev, arrBytePacket, len(arrBytePacket)) != 0:
+        print ('\nError sending the packet: %s\n' % pcap_geterr(handlePcapDev))
         sys.exit(1)
 
-    pcap_close(fp)
-    return packet
+    pcap_close(handlePcapDev)
+    return arrBytePacket
 
 ## Receive packets, expect device to receive on, src mac address + ethertype to filter on and timeout in seconds
-def receiveRawPackets(npfdevice, timeout, srcmac, ethertype, stopOnReceive=False):
-    receivedRawData = []
-    fp = c_void_p
-    errbuf = create_string_buffer(256)
-    fp = pcap_open_live(npfdevice, 65535, 1, 1000, errbuf)
-    if not bool(fp):
-        print("\nUnable to open the adapter. %s is not supported by Pcap\n" % interfaces[int(answer - 1)][0])
+def receiveRawPackets(bNpfdevice, iTimeout, sSrcmac, sEthertype, stopOnReceive = False):
+    arrReceivedRawData = []
+    bufErrbuf = create_string_buffer(256)
+    handlePcapDev = pcap_open_live(bNpfdevice, 65535, 1, 1000, bufErrbuf) ## Device, max packet size, promiscuous mode, time limit in ms, buffer for errors
+    if not bool(handlePcapDev):
+        print('\nUnable to open the adapter. %s is not supported by Pcap\n' % bNpfdevice)
         sys.exit(1)
 
-    header = POINTER(pcap_pkthdr)()
-    pkt_data = POINTER(c_ubyte)()
-    receivedpacket = pcap_next_ex(fp, byref(header), byref(pkt_data))
+    ptrHeader = POINTER(pcap_pkthdr)()
+    ptrPktData = POINTER(c_ubyte)()
+    iReceivedpacket = pcap_next_ex(handlePcapDev, byref(ptrHeader), byref(ptrPktData))
     ## Regular handler, loop until told otherwise (or with timer)
-    timer = time.time() + int(timeout)
+    flTimer = time.time() + int(iTimeout)
     i = 0
-    while receivedpacket >= 0:
-        timeleft = int(round(timer - time.time(), 0))
-        status("Received packets: %s, time left: %i  \r" % (str(i), timeleft))
-        if receivedpacket == 0 or timeleft <= 0:
-            # PCAP networkstack timeout elapsed or regular timeout
-            break
-        rawdata = pkt_data[0:header.contents.len]
-        packettype = hexlify(bytearray(rawdata[12:14])).lower()
-        targetmac = hexlify(bytearray(rawdata[:6])).lower()
-        if packettype == ethertype.lower() and srcmac.lower() == targetmac:
-            #print('Succes! Found an ' + ethertype + ' packet                          ')
-            receivedRawData.append(rawdata)
+    while iReceivedpacket >= 0:
+        iTimeleft = int(round(flTimer - time.time(), 0))
+        status('Received packets: %s, time left: %i  \r' % (str(i), iTimeleft))
+        if iTimeleft <= 0: break ## PCAP networkstack timeout elapsed or regular timeout
+        lstRawdata = ptrPktData[0:ptrHeader.contents.len]
+        sPackettype = hexlify(bytearray(lstRawdata[12:14])).decode().lower()
+        sTargetmac = hexlify(bytearray(lstRawdata[:6])).decode().lower()
+        if sPackettype == sEthertype.lower() and sSrcmac.lower() == sTargetmac:
+            #print('Succes! Found an %s packet.' % sEthertype)
+            arrReceivedRawData.append(lstRawdata)
             if stopOnReceive: break
 
         ## Load next packet
-        receivedpacket = pcap_next_ex(fp, byref(header), byref(pkt_data))
+        iReceivedpacket = pcap_next_ex(handlePcapDev, byref(ptrHeader), byref(ptrPktData))
         i += 1
-    pcap_close(fp)
-    return receivedRawData
+    pcap_close(handlePcapDev)
+    return arrReceivedRawData
 
 ## Parsing the Raw PN_DCP data on discovery (source: https://code.google.com/p/scada-tools/source/browse/profinet_scanner.py)
 ## Returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
-def parseResponse(data, mac):
-    result = {}
-    result['mac_address'] = mac
-    result['type_of_station'] = 'None'
-    result['name_of_station'] = 'None'
-    result['vendor_id'] = 'None'
-    result['device_id'] = 'None'
-    result['device_role'] = 'None'
-    result['ip_address'] = 'None'
-    result['subnet_mask'] = 'None'
-    result['standard_gateway'] = 'None'
+def parseResponse(sHexdata, sMac):
+    arrDevice = {}
+    arrDevice['mac_address'] = sMac
+    arrDevice['type_of_station'] = 'None'
+    arrDevice['name_of_station'] = 'None'
+    arrDevice['vendor_id'] = 'None'
+    arrDevice['device_id'] = 'None'
+    arrDevice['device_role'] = 'None'
+    arrDevice['ip_address'] = 'None'
+    arrDevice['subnet_mask'] = 'None'
+    arrDevice['standard_gateway'] = 'None'
+    arrDevice['hardware'] = None
+    arrDevice['firmware'] = None
     ## Since this is the parse of a DCP identify response, data should start with feff (Profinet FrameID 0xFEFF)
-    if not str(data[:4]).lower() == 'feff':
+    if not str(sHexdata[:4]).lower() == 'feff':
         print('Error: this data is not a proper DCP response?')
-        return result
+        return arrDevice
     
-    dataToParse = data[24:] # (Static) offset to where first block starts
+    dataToParse = sHexdata[24:] # (Static) offset to where first block starts
     while len(dataToParse) > 0:
         ## Data is divided into blocks, where block length is set at byte 2 & 3 (so offset [4:8]) of the block
         blockLength = int(dataToParse[2*2:4*2], 16)
@@ -281,26 +285,26 @@ def parseResponse(data, mac):
         ## Parse the block
         blockID = str(block[:2*2])
         if blockID == '0201':
-            result['type_of_station'] = str(unhexlify(block[4*2:4*2 + blockLength*2]))[2:]
+            arrDevice['type_of_station'] = str(unhexlify(block[4*2:4*2 + blockLength*2]))[2:-1].replace(r'\x00','')
         elif blockID == '0202':
-            result['name_of_station'] = str(unhexlify(block[4*2:4*2 + blockLength*2]))[2:]
+            arrDevice['name_of_station'] = str(unhexlify(block[4*2:4*2 + blockLength*2]))[2:-1].replace(r'\x00','')
         elif blockID == '0203':
-            result['vendor_id'] = str(block[6*2:8*2])
-            result['device_id'] = str(block[8*2:10*2])
+            arrDevice['vendor_id'] = str(block[6*2:8*2])
+            arrDevice['device_id'] = str(block[8*2:10*2])
         elif blockID == '0204':
-            result['device_role'] = str(block[6*2:7*2])
+            arrDevice['device_role'] = str(block[6*2:7*2])
             devrole = ''
             
         elif blockID == '0102':
-            result['ip_address'] = socket.inet_ntoa(struct.pack(">L", int(block[6*2:10*2], 16)))
-            result['subnet_mask'] = socket.inet_ntoa(struct.pack(">L", int(block[10*2:14*2], 16)))
-            result['standard_gateway'] = socket.inet_ntoa(struct.pack(">L", int(block[14*2:18*2], 16)))
+            arrDevice['ip_address'] = socket.inet_ntoa(struct.pack(">L", int(block[6*2:10*2], 16)))
+            arrDevice['subnet_mask'] = socket.inet_ntoa(struct.pack(">L", int(block[10*2:14*2], 16)))
+            arrDevice['standard_gateway'] = socket.inet_ntoa(struct.pack(">L", int(block[14*2:18*2], 16)))
         
         ## Maintain the loop
         padding = blockLength%2 # Will return 1 if odd
         dataToParse = dataToParse[(4 + blockLength + padding)*2:]
         
-    return result
+    return arrDevice
         
 def status(msg):
     sys.stderr.write(msg)
@@ -310,7 +314,7 @@ def endIt(sMessage=''):
     print
     if sMessage: print('Error message: '+sMessage)
     print('All done')
-    raw_input('Press ENTER to continue')
+    input('Press ENTER to continue')
     sys.exit()
 
 def scanPort(ip, port):
@@ -375,11 +379,12 @@ def getInfo(device):
         print('------ INFORMATION GATHERED THROUGH TCPIP (DIRECT) --------')
         getInfoViaCOTP(device)
         print('')
-        print(' --> CPU State: '+getCPU(device)+'\n')
-    raw_input('Press [Enter] to return to the menu')
+        print(' --> CPU State: ' + getCPU(device) + '\n')
+    input('Press [Enter] to return to the menu')
     return device
 
 def isIpv4(ip):
+    if ip == '0.0.0.0': return True
     match = re.match("^(\d{0,3})\.(\d{0,3})\.(\d{0,3})\.(\d{0,3})$", ip)
     if not match:
         return False
@@ -389,7 +394,7 @@ def isIpv4(ip):
     if quad[0] < 1:
         return False
     for number in quad:
-	if number > 255 or number < 0:
+        if number > 255 or number < 0:
             return False
     return True
 
@@ -404,15 +409,15 @@ def setNetwork(device, npfdevice, srcmac):
     
     os.system('cls' if os.name == 'nt' else 'clear')
     print('      ###--- DEVICE NETWORK CONFIG ---###')
-    newip = raw_input('Provide the new IP address ['+device['ip_address']+']     : ')
+    newip = input('Provide the new IP address ['+device['ip_address']+']     : ')
     if newip == '': newip = device['ip_address']
-    newsnm = raw_input('Provide the new subnet mask ['+device['subnet_mask']+']    : ')
+    newsnm = input('Provide the new subnet mask ['+device['subnet_mask']+']    : ')
     if newsnm == '': newsnm = device['subnet_mask']
-    newgw = raw_input('Provide the new standard gateway ['+device['standard_gateway']+']: ')
+    newgw = input('Provide the new standard gateway ['+device['standard_gateway']+']: ')
     if newgw == '': newgw = device['standard_gateway']
     if not isIpv4(newip) or not isIpv4(newsnm) or not isIpv4(newgw):
         print('One or more addresses were wrong. \nPlease go read RFC 791 and then use a legitimate IPv4 address.')
-        raw_input('')
+        input('')
         return device
     networkdata = ipToHex(newip) + ipToHex(newsnm) + ipToHex(newgw)
     print('Hold on, crafting packet...')
@@ -421,15 +426,16 @@ def setNetwork(device, npfdevice, srcmac):
     ## First start a background capture to capture the reply
     scan_response = ''
     pool = ThreadPool(processes=1)
-    async_result = pool.apply_async(receiveRawPackets, (npfdevice, 2, srcmac, '8892', True))
-    time.sleep(1) # Give thread time to start
+    async_result = pool.apply_async(receiveRawPackets, (npfdevice, iDiscoverTimeout, srcmac, '8892', True))
+    #time.sleep(1) # Give thread time to start
 
     ## Send packet
     sendRawPacket(npfdevice, '8892', srcmac, True, networkdata, device['mac_address'].replace(':', ''))
+    time.sleep(1) # Wait for response to return
 
     ## Check if response is OK
-    data = hexlify(bytearray(async_result.get()[0]))[28:]
-    responsecode = str(data[36:40])
+    data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
+    responsecode = data[36:40]
     if responsecode == '0000':
         print('Successfully set new networkdata!                     ')
         device['ip_address'] = newip
@@ -442,30 +448,30 @@ def setNetwork(device, npfdevice, srcmac):
     else:
         print('Undefined response (' + responsecode + '), please investigate.        ')
     
-    raw_input('Press [Enter] to return to the device menu')
+    input('Press [Enter] to return to the device menu')
     return device
 
 def setStationName(device, npfdevice, srcmac):
     os.system('cls' if os.name == 'nt' else 'clear')
     print('      ###--- DEVICE NETWORK CONFIG ---###')
-    print('Attention: Only lower case letters and the \'-\' symbol are allowed!')
-    newname = raw_input('Provide the new name ['+device['name_of_station']+']     : ')
+    print('Attention: Only lower case letters and the \'.\' and \'-\' symbols are allowed!')
+    newname = input('Provide the new name ['+device['name_of_station']+']     : ')
     if newname == '': newname = device['name_of_station']
     
     ## First start a background capture to capture the reply
     scan_response = ''
     pool = ThreadPool(processes=1)
-    async_result = pool.apply_async(receiveRawPackets, (npfdevice, 2, srcmac, '8892', True))
+    async_result = pool.apply_async(receiveRawPackets, (npfdevice, iDiscoverTimeout, srcmac, '8892', True))
     time.sleep(1) # Give thread time to start
 
     ## Send packet length, PN_DCP SET (04), Request (00), DeviceName-Xid (02010004), Padding (0000), DCPLength (0012 or d18)
     ##  Device Properties (02), NameOfStation (02), DCPLength (000d or d13), BlockQualifier (0001), NameItself (11 byte), Padding (00)
     ##  Padding (to get to 60 bytes?)
-    nname=hexlify(newname.lower())
-    namelength=len(nname)/2
+    nname=hexlify(newname.lower().encode()).decode(errors='ignore')
+    namelength=int(len(nname)/2)
     padding = ''
     if namelength%2 == 1: padding = '00'
-    firstDCP = hex(namelength+(len(padding)/2)+6)[2:]
+    firstDCP = hex(namelength+(int(len(padding)/2))+6)[2:]
     if len(firstDCP) == 1: firstDCP='000'+firstDCP
     if len(firstDCP) == 2: firstDCP='00'+firstDCP
     if len(firstDCP) == 3: firstDCP='0'+firstDCP
@@ -487,8 +493,8 @@ def setStationName(device, npfdevice, srcmac):
     sendRawPacket(npfdevice, '8892', srcmac, False, data.replace(' ',''), device['mac_address'].replace(':', ''))
 
     ## Check if response is OK
-    data = hexlify(bytearray(async_result.get()[0]))[28:]
-    responsecode = str(data[36:38])
+    data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
+    responsecode = data[36:38]
     if responsecode == '00':
         print('Successfully set new Station Name to '+newname)
         device['name_of_station']=newname
@@ -496,7 +502,7 @@ def setStationName(device, npfdevice, srcmac):
         print('Error setting Station Name: Name Not Accepted!')
         print(data)
 
-    raw_input('Press [Enter] to return to the device menu')
+    input('Press [Enter] to return to the device menu')
     return device
 
 def send_and_recv(sock, strdata, sendOnly = False):
@@ -508,15 +514,17 @@ def send_and_recv(sock, strdata, sendOnly = False):
 
 def getS7GetCoils(ip):
     def printData(sWhat, s7Response): ## Expects 4 byte hex data (e.g. 00000000)
-        if not s7Response[18:20] == '00': finish('Some error occured with S7Comm Setup, full response: ' + str(s7Response) + '\n')
+        if not s7Response[18:20] == '00': print('Some error occured with S7Comm Setup, full response: ' + str(s7Response) + '\n')
         s7Data = s7Response[14:]
         datalength = int(s7Data[16:20], 16) ## Normally 5 bytes for a byte, 6 if we request word, 8 if we request real
         s7Items = s7Data[28:28 + datalength*2]
-        if not s7Items[:2] == 'ff': finish('Some error occured with S7Comm Data Read, full S7Comm data: ' + str(s7Data) + '\nFirmware not supported?\n')
+        if not s7Items[:2] == 'ff':
+            print('Some error occured with S7Comm Data Read, full S7Comm data: ' + str(s7Data) + '\nFirmware not supported?\n')
+            return False
     
         print('     ###--- ' + sWhat + ' ---###')
         sToShow = [''] * 8
-        for i in range(0,4):
+        for i in range(0, 6):
             iOffset1 = (4 - i) * -2
             iOffset2 = iOffset1 + 2
             if iOffset2 == 0: iOffset2 = None
@@ -529,6 +537,7 @@ def getS7GetCoils(ip):
                 sToShow[j] = sToShow[j] +  str(i) + '.' + str(j) + ': ' + str(bVal) + ' | ' 
         for i in range(0,8): print(sToShow[i][:-2])
         print('')
+        return True
 
     sock = setupConnection(ip, 102)
 
@@ -538,27 +547,28 @@ def getS7GetCoils(ip):
     ##   '000000' means starting at Address 0 (I think)
     
     ## Get Inputs in Dword (so 32 inputs) starting from Address 0
-    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 81 000000'.replace(' ','')))
-    printData('Inputs',s7Response)
+    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 81 000000'.replace(' ',''))).decode(errors='ignore')
+    if not printData('Inputs',s7Response): return False
 
     ## Outputs (82)
-    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 82 000000'.replace(' ','')))
-    printData('Outputs',s7Response)
+    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 82 000000'.replace(' ',''))).decode(errors='ignore')
+    if not printData('Outputs',s7Response): return False
 
     ## Merkers (83)
-    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 83 000000'.replace(' ','')))
-    printData('Merkers',s7Response)
+    s7Response = hexlify(send_and_recv(sock, '0300001f' + '02f080' + '32010000732f000e00000401120a10 06 00010000 83 000000'.replace(' ',''))).decode(errors='ignore')
+    if not printData('Merkers',s7Response): return False
     sock.close()
+    return True
 
 def setupConnection(sIP, iPort):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1)
     sock.connect((sIP, iPort))
     ## Always start with a COTP CR (Connection Request), we need a CS (Connection Success) back
-    cotpsync = hexlify(send_and_recv(sock, '03000016' + '11e00000000100c0010ac1020100c2020101'))
+    cotpsync = hexlify(send_and_recv(sock, '03000016' + '11e00000000100c0010ac1020100c2020101')).decode(errors='ignore')
     if not cotpsync[10:12] == 'd0': finish('COTP Sync failed, PLC not reachable?')
     ## First 4 bytes are TPKT (last byte==datalength), next 3 bytes are COTP, last 18 bytes are S7Comm Setup Communication
-    s7comsetup = hexlify(send_and_recv(sock, '03000019' + '02f080' + '32010000722f00080000f0000001000101e0'))
+    s7comsetup = hexlify(send_and_recv(sock, '03000019' + '02f080' + '32010000722f00080000f0000001000101e0')).decode(errors='ignore')
     if not s7comsetup[18:20] == '00': finish('Some error occured with S7Comm setup, full data: ' + s7comsetup)
     return sock
 
@@ -575,7 +585,7 @@ def setOutputs(sIP, iPort, sOutputs):
 
     ## Set Outputs
     ## First 4 bytes are TPKT (last byte==datalength), next 3 bytes are COTP, last 24 bytes are S7Comm Set Var, last byte contains data to send!
-    s7Response = hexlify(send_and_recv(sock, '03000024' + '02f080' + '32010000732f000e00050501120a1002000100008200000000040008' + hexstring))
+    s7Response = hexlify(send_and_recv(sock, '03000024' + '02f080' + '32010000732f000e00050501120a1002000100008200000000040008' + hexstring)).decode(errors='ignore')
     if s7Response[-2:] == 'ff': print('Writing Outputs successful')
     else: print('Error writing outputs.')
     sock.close()
@@ -604,16 +614,19 @@ def setMerkers(sIP, iPort, sMerkers, iMerkerOffset=0):
     hMerkerOffset = hMerkerOffset.zfill(6) ## Add leading zero's up to 6
     print('Sending '+hexstring+' using offset '+hMerkerOffset)
 
-    s7Response = hexlify(send_and_recv(sock, '03000025' + '02f080' + '320100001500000e00060501120a100400010000 83 ' + hMerkerOffset + '00 04 0010' + hexstring + '00'))
+    s7Response = hexlify(send_and_recv(sock, '03000025' + '02f080' + '320100001500000e00060501120a100400010000 83 ' + hMerkerOffset + '00 04 0010' + hexstring + '00')).decode(errors='ignore')
     if s7Response[-2:] == 'ff': print('Writing Merkers successful')
     else: print('Error writing merkers.')
     sock.close()
 
 def manageOutputs(device):
+    os.system('cls' if os.name == 'nt' else 'clear')
+    if device['firmware'] and device['firmware'][:2].lower() == 'v4':
+        print('Warning, firmware v4 detected, will probably not work')
     status = ''
     while True:
         ports = []
-        os.system('cls' if os.name == 'nt' else 'clear')
+        boolAlive = False
         print('      ###--- Manage Outputs ---###')
         if status != '':
             print('## --> ' + status)
@@ -629,71 +642,86 @@ def manageOutputs(device):
         for port in ports:
             if port == 102:
                 print('S7Comm (Siemens) detected, getting outputs...')
-                getS7GetCoils(device['ip_address'])
-                ans = raw_input('Do you want to alter outputs, memory or Not? [o/m/N]: ')
-                if ans.lower() == 'o':
-                    array = raw_input('What outputs to set please? [00000000]: ')
-                    setOutputs(device['ip_address'], 102, array)
-                    status = 'Output has been send to device, verifying results: '
-                if ans.lower() == 'm':
-                    array = raw_input('What memory merkers + offset to set please? [00000000,0]: ')
-                    offset = int(array.split(',')[1])
-                    array = array.split(',')[0]
-                    setMerkers(device['ip_address'], 102, array, offset)
-                    status = 'Merkers have been send to device, verifying results: '
+                boolAlive = getS7GetCoils(device['ip_address'])
+                if boolAlive:
+                    ans = input('Do you want to alter outputs, memory or Not? [o/m/N]: ')
+                    if ans.lower() == 'o':
+                        array = input('What outputs to set please? [00000000]: ')
+                        setOutputs(device['ip_address'], 102, array)
+                        status = 'Output has been send to device, verifying results: '
+                    if ans.lower() == 'm':
+                        array = input('What memory merkers + offset to set please? [00000000,0]: ')
+                        offset = int(array.split(',')[1])
+                        array = array.split(',')[0]
+                        setMerkers(device['ip_address'], 102, array, offset)
+                        status = 'Merkers have been send to device, verifying results: '
                     
-                if ans.lower() == 'n' or ans.lower() == '': return 0
-            else: return 1
-    raw_input('Press [Enter] to return to the device menu')
+                    if ans.lower() == 'n' or ans.lower() == '': return 0
+                else: break
+        if not boolAlive: break
+    input('Press [Enter] to return to the device menu')
 
 def flashLED(device, srcmac):
-    duration = input('How long should the LED flash? (seconds): ')
+    sDuration = input('How long should the LED flash? (seconds): ')
+    iDuration = 2
+    if sDuration.isdigit(): iDuration = int(sDuration)
     runLoop = True
     i = 0
     while runLoop:
         os.system('cls' if os.name == 'nt' else 'clear')
         print('     ###--- Flashing LED ---###')
-        print 'Flashing LED of '+device['name_of_station']+', '+str(i)+' out of '+str(duration)+ ' seconds.'
+        print('Flashing LED of ' + device['name_of_station'] + ', ' + str(i) + ' out of ' + str(iDuration) +  ' seconds.')
 
         ## Send packet (length, PN_DCP SET (04), Request (00), LED-Xid (00001912), DCPLength (8), Control (5), Signal (3), DCPLength (4), Undecoded (0100)
         data='fefd 040000001912000000080503000400000100 000000000000000000000000000000000000000000000000000000000000'
-        sendRawPacket(npfdevice, '8892', srcmac, False, data.replace(' ',''), device['mac_address'].replace(':', ''))
+        sendRawPacket(bNpfdevice, '8892', srcmac, False, data.replace(' ',''), device['mac_address'].replace(':', ''))
         
-        i+=2
-        if i > duration:
-            runLoop = False
+        i += 2
+        if i > iDuration: runLoop = False
         time.sleep(2)
         
         
 def getInfoViaCOTP(device):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1) # 1 second timeout
-    sock.connect((device['ip_address'], 102)) ## Will setup TCP/SYN with port 102
-    cotpconnectresponse = hexlify(send_and_recv(sock, '03000016'+'11e00000000500c1020600c2020600c0010a'))
+    try:
+        sock.connect((device['ip_address'], 102)) ## Will setup TCP/SYN with port 102
+    except:
+        print('No route to IP ' + device['ip_address'])
+        return
+    cotpconnectresponse = hexlify(send_and_recv(sock, '03000016'+'11e00000000500c1020600c2020600c0010a')).decode(errors='ignore')
     if not cotpconnectresponse[10:12] == 'd0':
         print('COTP Connection Request failed, no route to IP '+device['ip_address']+'?')
-        return []
+        return
 
     data = '720100b131000004ca0000000200000120360000011d00040000000000a1000000d3821f0000a3816900151653657276657253657373696f6e5f3742363743433341a3822100150b313a3a3a362e303a3a3a12a3822800150d4f4d532b204465627567676572a38229001500a3822a001500a3822b00048480808000a3822c001211e1a304a3822d001500a1000000d3817f0000a38169001515537562736372697074696f6e436f6e7461696e6572a2a20000000072010000'
-    tpktlength = str(hex((len(data)+14)/2))[2:] ## Dynamically find out the data length
-    cotpdata = send_and_recv(sock, '030000'+tpktlength+'02f080'+data)
-
+    tpktlength = str(hex(int((len(data)+14)/2)))[2:] ## Dynamically find out the data length
+    cotpdata = send_and_recv(sock, '030000'+tpktlength+'02f080'+data).decode(errors='ignore')
+    
     ## It is sure that the CPU state is NOT in this response
-    print('Hardware: '+cotpdata.split(';')[2])
-    print('Firmware: '+filter(lambda x: x in string.printable, cotpdata.split(';')[3].replace('@','.')))
+    if len(cotpdata.split(';')) >= 4:
+        sHardware = cotpdata.split(';')[2]
+        sFirmware = ''.join(list(filter(lambda x: x in string.printable, cotpdata.split(';')[3].replace('@','.'))))
+        print('Hardware: ' + sHardware)
+        print('Firmware: ' + sFirmware)
+        device['hardware'] = sHardware
+        device['firmware'] = sFirmware
 
     sock.close()
+    return device
 
 def manageCPU(device):
     runLoop = True
+    boolWorked = True
     while runLoop:
         os.system('cls' if os.name == 'nt' else 'clear')
+        if not boolWorked: print('CPU flip seems to have failed, is this a PLC SIM?')
         print('     ###--- Manage CPU ---###\n')
         print('Current CPU state: '+getCPU(device))
-        ans = raw_input('Do you want to flip CPU state? [y/N]: ')
+        ans = input('Do you want to flip CPU state? [y/N]: ')
         if ans.lower() == 'y':
             print('This will take some seconds ...')
-            changeCPU(device)
+            boolWorked = changeCPU(device)
         else:
             runLoop = False
         
@@ -702,24 +730,27 @@ def getCPU(device):
     sState = 'Running'
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1) # 1 second timeout
-    sock.connect((device['ip_address'], 102)) ## Will setup TCP/SYN with port 102
+    try:
+        sock.connect((device['ip_address'], 102)) ## Will setup TCP/SYN with port 102
+    except:
+        return 'Unknown'
     # Firstly: the COTP Connection Request (CR), should result in Connection Confirm (CC)
     ## TPKT header + COTP CR TPDU with src-ref 0x0005 (gets response with dst-ref 0x0005)
-    cotpconnectresponse = hexlify(send_and_recv(sock, '03000016'+'11e00000001d00c1020100c2020100c0010a'))
+    cotpconnectresponse = hexlify(send_and_recv(sock, '03000016'+'11e00000001d00c1020100c2020100c0010a')).decode(errors='ignore')
     ## Response should be 03000016 11d00005001000c0010ac1020600c2020600
     if not cotpconnectresponse[10:12] == 'd0':
-        print 'COTP Connection Request failed'
-        return
+        print('COTP Connection Request failed')
+        return ''
     ##---- S7 Setup Comm ------------
     ## TPKT header + COTP header + S7 data (which is: Header -Job- + Parameter -Setup-)
     s7setupdata='32010000020000080000'+'f0000001000101e0'
-    tpktlength = str(hex((len(s7setupdata)+14)/2))[2:]
+    tpktlength = str(hex(int((len(s7setupdata)+14)/2)))[2:]
     s7setup = send_and_recv(sock, '030000'+tpktlength+'02f080'+s7setupdata)
     ##---- S7 Request CPU -----------
     s7readdata = '3207000005000008 000800011204 11440100ff09000404240001'
-    tpktlength = str(hex((len(s7readdata.replace(' ',''))+14)/2))[2:]
+    tpktlength = str(hex(int((len(s7readdata.replace(' ',''))+14)/2)))[2:]
     s7read = send_and_recv(sock,'030000'+tpktlength+'02f080'+s7readdata)
-    if hexlify(s7read[44:45]) == '03': sState = 'Stopped'
+    if hexlify(s7read[44:45]).decode(errors='ignore') == '03': sState = 'Stopped'
     sock.close()
     return sState
 
@@ -731,8 +762,10 @@ def changeCPU(device):
     ## CR TPDU
     send_and_recv(sock,'03000016'+'11e00000002500c1020600c2020600c0010a')
     ## 'SubscriptionContainer'
-    sResp = hexlify(send_and_recv(sock,'030000c0'+'02f080'+'720100b131000004ca0000000200000120360000011d00040000000000a1000000d3821f0000a3816900151653657276657253657373696f6e5f4536463534383534a3822100150b313a3a3a362e303a3a3a12a3822800150d4f4d532b204465627567676572a38229001500a3822a001500a3822b00048480808000a3822c001211e1a300a3822d001500a1000000d3817f0000a38169001515537562736372697074696f6e436f6e7461696e6572a2a20000000072010000'))
-    sSID = str(hex(int(sResp[48:50],16)+int('80',16))).replace('0x','')
+    sResp = hexlify(send_and_recv(sock,'030000c0'+'02f080'+'720100b131000004ca0000000200000120360000011d00040000000000a1000000d3821f0000a3816900151653657276657253657373696f6e5f4536463534383534a3822100150b313a3a3a362e303a3a3a12a3822800150d4f4d532b204465627567676572a38229001500a3822a001500a3822b00048480808000a3822c001211e1a300a3822d001500a1000000d3817f0000a38169001515537562736372697074696f6e436f6e7461696e6572a2a20000000072010000')).decode(errors='ignore')
+    sSID = str(hex(int('0'+sResp[48:50],16)+int('80',16))).replace('0x','')
+    if len(sSID)%2 == 1:  sSID = '0' + sSID
+    #print('Using SID ' + sSID)
     if curState == 'Stopped': ## Will perform start
         send_and_recv(sock,'03000078'+'02f080'+'72020069310000054200000003000003'+sSID+'34000003 ce 010182320100170000013a823b00048140823c00048140823d000400823e00048480c040823f0015008240001506323b313035388241000300030000000004e88969001200000000896a001300896b000400000000000072020000')
     else:
@@ -744,7 +777,11 @@ def changeCPU(device):
     while runloop:
         try: response = sock.recv(65000)
         except: runloop = False
-    send_and_recv(sock,'03000042'+'02f080'+'7202003331000004fc00000007000003'+sSID+'360000003402913d9b1e000004e88969001200000000896a001300896b00040000000000000072020000')
+    try:
+        send_and_recv(sock,'03000042'+'02f080'+'7202003331000004fc00000007000003'+sSID+'360000003402913d9b1e000004e88969001200000000896a001300896b00040000000000000072020000')
+    except:
+        sock.close()
+        return False
     if curState == 'Stopped': ## Will perform start
         send_and_recv(sock,'03000043'+'02f080'+'7202003431000004f200000008000003'+sSID+'36000000340190770008 03 000004e88969001200000000896a001300896b00040000000000000072020000')
     else:
@@ -752,12 +789,12 @@ def changeCPU(device):
     send_and_recv(sock,'0300003d'+'02f080'+'7202002e31000004d40000000a000003'+sSID+'34000003d000000004e88969001200000000896a001300896b000400000000000072020000')
     
     sock.close()
-    return
+    return True
 
 ##### The Actual Program
 ## The Banner
 os.system('cls' if os.name == 'nt' else 'clear')
-print """
+print("""
 [*****************************************************************************]
                    This script works on both Linux and Windows
                    
@@ -774,40 +811,41 @@ print """
 
 ______________________/-> Created By Tijl Deneut(c) <-\_______________________
 [*****************************************************************************]
-"""
+""")
 ## List interfaces
-interfaces = getAllInterfaces()
-i = 1
-for interface in interfaces: #array of arrays: adapter, ip, mac, windows devicename, windows guid
-    print('[' + str(i) + '] ' + interface[2] + ' has ' + interface[1] + ' (' + interface[0] + ')')
-    i += 1
-print('[Q] Quit now')
-answer = raw_input('Please select the adapter [1]: ')
-if answer.lower() == 'q': sys.exit()
-if answer == '' or not answer.isdigit() or int(answer) >= i: answer = 1
+arrInterfaces = getAllInterfaces()
+if len(getAllInterfaces()) > 1:
+    for iNr, arrInterface in enumerate(arrInterfaces): print('[' + str(iNr + 1) + '] ' + arrInterface[2] + ' has ' + arrInterface[1] + ' (' + arrInterface[0] + ')')
+    print('[Q] Quit now')
+    sAnswer1 = input('Please select the adapter [1]: ')
+    if sAnswer1.lower() == 'q': sys.exit()
+    if sAnswer1 == '' or not sAnswer1.isdigit() or int(sAnswer1) >= len(arrInterfaces): sAnswer1 = 1
+else:
+    sAnswer1 = 1
 
 ## Create vars
-adapter = interfaces[int(answer) - 1][0]                  # eg: 'Ethernet 2'
-macaddr = interfaces[int(answer) - 1][2].replace(':', '') # eg: 'ab58e0ff585a'
-winguid = interfaces[int(answer) - 1][4]                  # eg: '{875F7EDB-CA23-435E-8E9E-DFC9E3314C55}'
+sAdapter = arrInterfaces[int(sAnswer1) - 1][0]                  # eg: 'Ethernet 2'
+sMacaddr = arrInterfaces[int(sAnswer1) - 1][2].replace(':', '') # eg: 'ab58e0ff585a'
+sWinguid = arrInterfaces[int(sAnswer1) - 1][4]                  # eg: '{875F7EDB-CA23-435E-8E9E-DFC9E3314C55}'
 
 ## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
-npfdevice = adapter
-if os.name == 'nt': npfdevice = '\Device\NPF_' + winguid
-print('Using adapter ' + adapter + '\n')
+sNpfdevice = sAdapter
+if os.name == 'nt': sNpfdevice = r'\Device\NPF_' + sWinguid
+print('Using adapter ' + sAdapter + '\n')
+bNpfdevice = sNpfdevice.encode()
 
 ## Start building discovery packet
 print('Building packet')
 
 ## Sending the raw packet (packet itself is returned) (8100 == PN_DCP, 88cc == LDP)
-packet = sendRawPacket(npfdevice, '8100', macaddr)
+packet = sendRawPacket(bNpfdevice, '8100', sMacaddr)
 print('\nPacket has been sent (' + str(len(packet)) + ' bytes)')
 
 ## Receiving packets as bytearr (88cc == LDP, 8892 == device PN_DCP)
-print('\nReceiving packets over 2 seconds ...\n')
-receivedDataArr = receiveRawPackets(npfdevice, 2, macaddr, '8892')
+print('\nReceiving packets over ' + str(iDiscoverTimeout) + ' seconds ...\n')
+receivedDataArr = receiveRawPackets(bNpfdevice, iDiscoverTimeout, sMacaddr, '8892')
 print
-print('Saved ' + str(len(receivedDataArr)) + ' packets')
+print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
 print
 
 ## Now we parse:
@@ -816,36 +854,34 @@ if len(receivedDataArr) == 0:
     endIt()
 
 print('These are the devices detected (' + str(len(receivedDataArr)) + '):')
-print '{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID')
-deviceArr = []
+print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
+arrDevices = []
 for packet in receivedDataArr:
-    hexdata = hexlify(bytearray(packet))[28:] # take off ethernet header
+    sHexdata = hexlify(bytearray(packet))[28:].decode(errors='ignore') # take off ethernet header
     ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
     ##  takes 'translate' as a parameter, which will add these parsings:
     ##   (vendor id 002a == siemens) (device id 0a01=switch, 0202=simulator, 0203=s7-300 CP, 0101=s7-300 ...)
     ##   (0x01==IO-Device, 0x02==IO-Controller, 0x04==IO-Multidevice, 0x08==PN-Supervisor), (0000 0001, 0000 0010, 0000 0100, 0000 1000)
-    ## Getting MAC address from packet, formatting with ':' in between 
-    mac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet))[6*2:12*2])))[:-1]
-    result = parseResponse(hexdata, mac)
-    deviceArr.append(result)
-    devicename = str(result['name_of_station'])
-    if devicename == '': devicename = str(result['type_of_station'])
-    print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(mac, devicename, result['type_of_station'], result['ip_address'], result['vendor_id']))
+    ## Getting MAC address from packet, formatting with ':' in between
+    sMac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet)).decode(errors='ignore')[6*2:12*2])))[:-1]
+    arrResult = parseResponse(sHexdata, sMac)
+    arrDevices.append(arrResult)
+    sDevicename = str(arrResult['name_of_station'])
+    if sDevicename == '': sDevicename = str(arrResult['type_of_station'])
+    print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(sMac, sDevicename, arrResult['type_of_station'], arrResult['ip_address'], arrResult['vendor_id']))
 
 ## Finished the scanning part, now the changing part
-#raw_input('Press ENTER to clear screen and continue with these ' + str(len(deviceArr)) + ' devices.')
+#input('Press ENTER to clear screen and continue with these ' + str(len(arrDevices)) + ' devices.')
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('      ###--- DEVICELIST ---###')
-    i = 1
-    for device in deviceArr:
-        print('[' + str(i) + '] ' + device['mac_address'] + ' (' + device['ip_address'] + ', '+ device['type_of_station'] + ', ' + device['name_of_station'] + ') ')
-        i += 1
+    for iNr, arrDevice in enumerate(arrDevices):
+        print('[' + str(iNr + 1) + '] ' + arrDevice['mac_address'] + ' (' + arrDevice['ip_address'] + ', '+ arrDevice['type_of_station'] + ', ' + arrDevice['name_of_station'] + ') ')
     print('[Q] Quit now')
-    answer1 = raw_input('Please select the device you want to use [1]: ')
-    if answer1.lower() == 'q': sys.exit()
-    if answer1 == '' or not answer1.isdigit() or int(answer1) >= i: answer1 = 1
-    device = deviceArr[int(answer1)-1]
+    sAnswer2 = input('Please select the device you want to use [1]: ')
+    if sAnswer2.lower() == 'q': sys.exit()
+    if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) >= len(arrDevices): sAnswer2 = 1
+    device = arrDevices[int(sAnswer2)-1]
     ## We have the device, now what to do with it?
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -860,14 +896,14 @@ while True:
         print('[O] Choose other device')
         print('[Q] Quit now')
         print
-        answer2 = raw_input('Please select what you want to do with ' + device['mac_address'] + ' (' + device['name_of_station'] + ')' + ' [1]: ')
-        if answer2.lower() == 'q': sys.exit()
-        if answer2.lower() == 'l': deviceArr[int(answer1)-1] = getInfo(device)
-        if answer2.lower() == 'p': manageOutputs(device)
-        if answer2.lower() == 'c': manageCPU(device)
-        if answer2.lower() == 'f': flashLED(device, macaddr)
-        if answer2.lower() == 'n': setStationName(device, npfdevice, macaddr)
-        if answer2.lower() == 'o': break
-        if answer2.lower() == '1' or answer2 == '':
-            device = setNetwork(device, npfdevice, macaddr)
-            deviceArr[int(answer1)-1] = device
+        sAnswer3 = input('Please select what you want to do with ' + device['mac_address'] + ' (' + device['name_of_station'] + ')' + ' [1]: ')
+        if sAnswer3.lower() == 'q': sys.exit()
+        if sAnswer3.lower() == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
+        if sAnswer3.lower() == 'p': manageOutputs(device)
+        if sAnswer3.lower() == 'c': manageCPU(device)
+        if sAnswer3.lower() == 'f': flashLED(device, sMacaddr)
+        if sAnswer3.lower() == 'n': setStationName(device, bNpfdevice, sMacaddr)
+        if sAnswer3.lower() == 'o': break
+        if sAnswer3.lower() == '1' or sAnswer3 == '':
+            device = setNetwork(device, bNpfdevice, sMacaddr)
+            arrDevices[int(sAnswer2)-1] = device
