@@ -881,7 +881,7 @@ while True:
     print('[Q] Quit now')
     sAnswer2 = input('Please select the device you want to use [1]: ')
     if sAnswer2.lower() == 'q': sys.exit()
-    if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) >= len(arrDevices): sAnswer2 = 1
+    if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
     device = arrDevices[int(sAnswer2)-1]
     ## We have the device, now what to do with it?
     while True:
