@@ -149,10 +149,8 @@ def getAllInterfaces():
             mac = intarr[2].replace('"','').lower().replace('-',':')
             winguid = intarr[3].replace('"','').replace('\n', '').replace('\r', '')[-38:]
             proc = Popen('netsh int ip show addr "' + adapter + '" | FINDSTR /I IP', shell=True, stdout=PIPE)
-            try:
-                ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].replace(' ',''))[0]
-            except:
-                ip = ''
+            try: ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].decode(errors='ignore').replace(' ',''))[0]
+            except: ip = ''
             interfaces=addToArr(interfaces, adapter, ip, mac, devicename, winguid)
 
     else: # And this on any Linux
