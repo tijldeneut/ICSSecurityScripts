@@ -149,10 +149,8 @@ def getAllInterfaces():
             mac = intarr[2].replace('"','').lower().replace('-',':')
             winguid = intarr[3].replace('"','').replace('\n', '').replace('\r', '')[-38:]
             proc = Popen('netsh int ip show addr "' + adapter + '" | FINDSTR /I IP', shell=True, stdout=PIPE)
-            try:
-                ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].replace(' ',''))[0]
-            except:
-                ip = ''
+            try: ip = re.findall( r'[0-9]+(?:\.[0-9]+){3}', proc.stdout.readlines()[0].decode(errors='ignore').replace(' ',''))[0]
+            except: ip = ''
             interfaces=addToArr(interfaces, adapter, ip, mac, devicename, winguid)
 
     else: # And this on any Linux
@@ -355,11 +353,15 @@ def getInfo(device):
     elif device['device_id'] == '010d': devid = 'S7-1200'
     elif device['device_id'] == '0301': devid = 'HMI'
     elif device['device_id'] == '010b': devid = 'ET200S'
-    binresult = bin(int(device['device_role'], 16))[2:]
-    if int(binresult) & 1 == 1: devrole += 'IO-Device '
-    if int(binresult) & 10 == 10: devrole += 'IO-Controller '
-    if int(binresult) & 100 == 100: devrole += 'IO-Multidevice '
-    if int(binresult) & 1000 == 1000: devrole += 'PN-Supervisor '
+    else: devid = ''
+    try:
+        binresult = bin(int(device['device_role'], 16))[2:]
+        if int(binresult) & 1 == 1: devrole += 'IO-Device '
+        if int(binresult) & 10 == 10: devrole += 'IO-Controller '
+        if int(binresult) & 100 == 100: devrole += 'IO-Multidevice '
+        if int(binresult) & 1000 == 1000: devrole += 'PN-Supervisor '
+    except:
+        devrole = ''
     print('               ###--- DEVICE INFO ---###')
     print('--------- INFORMATION GATHERED THROUGH PN_CDP -------------')
     print('Mac Address:      ' + device['mac_address'])
@@ -622,8 +624,8 @@ def setMerkers(sIP, iPort, sMerkers, iMerkerOffset=0):
 
 def manageOutputs(device):
     os.system('cls' if os.name == 'nt' else 'clear')
-    if device['firmware'] and device['firmware'][:2].lower() == 'v4':
-        print('Warning, firmware v4 detected, will probably not work')
+    #if device['firmware'] and device['firmware'][:2].lower() == 'v4':
+    #    print('Warning, firmware v4 detected, will probably not work')
     status = ''
     while True:
         ports = []
@@ -792,6 +794,22 @@ def changeCPU(device):
     sock.close()
     return True
 
+def addDevice(arrDevices):
+    sIP = input('Please enter IP to add: ')
+    arrDevice = {}
+    arrDevice['mac_address'] = 'UNK'
+    arrDevice['type_of_station'] = 'None'
+    arrDevice['name_of_station'] = 'None'
+    arrDevice['vendor_id'] = 'None'
+    arrDevice['device_id'] = 'None'
+    arrDevice['device_role'] = 'None'
+    arrDevice['ip_address'] = sIP
+    arrDevice['subnet_mask'] = 'None'
+    arrDevice['standard_gateway'] = 'None'
+    arrDevice['hardware'] = None
+    arrDevice['firmware'] = None
+    return arrDevice
+    
 ##### The Actual Program
 ## The Banner
 os.system('cls' if os.name == 'nt' else 'clear')
@@ -850,9 +868,9 @@ print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
 print
 
 ## Now we parse:
-if len(receivedDataArr) == 0:
-    print('No devices found, ending it...')
-    endIt()
+#if len(receivedDataArr) == 0:
+#    print('No devices found, ending it...')
+#    endIt()
 
 print('These are the devices detected (' + str(len(receivedDataArr)) + '):')
 print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
@@ -878,11 +896,16 @@ while True:
     print('      ###--- DEVICELIST ---###')
     for iNr, arrDevice in enumerate(arrDevices):
         print('[' + str(iNr + 1) + '] ' + arrDevice['mac_address'] + ' (' + arrDevice['ip_address'] + ', '+ arrDevice['type_of_station'] + ', ' + arrDevice['name_of_station'] + ') ')
+    print('[A] Manually add new device by IP')
     print('[Q] Quit now')
-    sAnswer2 = input('Please select the device you want to use [1]: ')
-    if sAnswer2.lower() == 'q': sys.exit()
+    sAnswer2 = input('Please select the option you want [1]: ')
+    if sAnswer2.lower() == 'q':
+        sys.exit()
+    elif sAnswer2.lower() == 'a':
+        device = addDevice(arrDevices)
+    else:
+        device = arrDevices[int(sAnswer2)-1]
     if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
-    device = arrDevices[int(sAnswer2)-1]
     ## We have the device, now what to do with it?
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -893,13 +916,14 @@ while True:
         print('[F] Flash the LED')
         print('[C] Change CPU State')
         print('[N] Change Device Name')
-        print
+        print('')
         print('[O] Choose other device')
         print('[Q] Quit now')
         print
-        sAnswer3 = input('Please select what you want to do with ' + device['mac_address'] + ' (' + device['name_of_station'] + ')' + ' [1]: ')
+        sAnswer3 = input('Please select what you want to do with ' + device['ip_address'] + ' (' + device['name_of_station'] + ')' + ' [1]: ')
         if sAnswer3.lower() == 'q': sys.exit()
-        if sAnswer3.lower() == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
+        #if sAnswer3.lower() == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
+        if sAnswer3.lower() == 'l': device = getInfo(device)
         if sAnswer3.lower() == 'p': manageOutputs(device)
         if sAnswer3.lower() == 'c': manageCPU(device)
         if sAnswer3.lower() == 'f': flashLED(device, sMacaddr)
