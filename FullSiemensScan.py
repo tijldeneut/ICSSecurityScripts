@@ -904,8 +904,8 @@ while True:
     elif sAnswer2.lower() == 'a':
         device = addDevice(arrDevices)
     else:
+	if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
         device = arrDevices[int(sAnswer2)-1]
-    if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
     ## We have the device, now what to do with it?
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
