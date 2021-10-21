@@ -216,7 +216,7 @@ def sendRawPacket(bNpfdevice, sEthertype, sSrcmac, boolSetNetwork = False, sNetw
         sys.exit(1)
 
     if pcap_sendpacket(handlePcapDev, arrBytePacket, len(arrBytePacket)) != 0:
-        print ('\nError sending the packet: %s\n' % pcap_geterr(handlePcapDev))
+        print('\nError sending the packet: %s\n' % pcap_geterr(handlePcapDev))
         sys.exit(1)
 
     pcap_close(handlePcapDev)
@@ -310,7 +310,7 @@ def status(msg):
     sys.stderr.flush()
 
 def endIt(sMessage=''):
-    print
+    print()
     if sMessage: print('Error message: '+sMessage)
     print('All done')
     input('Press ENTER to continue')
@@ -373,7 +373,7 @@ def getInfo(device):
     print('IP Address:       ' + device['ip_address'])
     print('Subnetmask:       ' + device['subnet_mask'])
     print('Standard Gateway: ' + device['standard_gateway'])
-    print
+    print()
     ## TCP port scan
     if s7present:
         print('------ INFORMATION GATHERED THROUGH TCPIP (plcscan) -------')
@@ -424,7 +424,7 @@ def setNetwork(device, npfdevice, srcmac):
         return device
     networkdata = ipToHex(newip) + ipToHex(newsnm) + ipToHex(newgw)
     print('Hold on, crafting packet...')
-    print
+    print()
 
     ## First start a background capture to capture the reply
     scan_response = ''
@@ -539,7 +539,7 @@ def getS7GetCoils(ip):
                 if not bVal == 0: bVal = 1
                 sToShow[j] = sToShow[j] +  str(i) + '.' + str(j) + ': ' + str(bVal) + ' | ' 
         for i in range(0,8): print(sToShow[i][:-2])
-        print('')
+        print()
         return True
 
     sock = setupConnection(ip, 102)
@@ -634,7 +634,7 @@ def manageOutputs(device):
         if status != '':
             print('## --> ' + status)
             status = ''
-        print
+        print()
         try: 
             ports = device['open_ports']
         except:
@@ -812,7 +812,7 @@ def addDevice(arrDevices):
     
 ##### The Actual Program
 ## The Banner
-os.system('cls' if os.name == 'nt' else 'clear')
+#os.system('cls' if os.name == 'nt' else 'clear')
 print("""
 [*****************************************************************************]
                    This script works on both Linux and Windows
@@ -863,9 +863,9 @@ print('\nPacket has been sent (' + str(len(packet)) + ' bytes)')
 ## Receiving packets as bytearr (88cc == LDP, 8892 == device PN_DCP)
 print('\nReceiving packets over ' + str(iDiscoverTimeout) + ' seconds ...\n')
 receivedDataArr = receiveRawPackets(bNpfdevice, iDiscoverTimeout, sMacaddr, '8892')
-print
+print()
 print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
-print
+print()
 
 ## Now we parse:
 #if len(receivedDataArr) == 0:
@@ -904,7 +904,7 @@ while True:
     elif sAnswer2.lower() == 'a':
         device = addDevice(arrDevices)
     else:
-	if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
+        if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
         device = arrDevices[int(sAnswer2)-1]
     ## We have the device, now what to do with it?
     while True:
@@ -916,11 +916,10 @@ while True:
         print('[F] Flash the LED')
         print('[C] Change CPU State')
         print('[N] Change Device Name')
-        print('')
+        print()
         print('[O] Choose other device')
-        print('[Q] Quit now')
-        print
-        sAnswer3 = input('Please select what you want to do with ' + device['ip_address'] + ' (' + device['name_of_station'] + ')' + ' [1]: ')
+        print('[Q] Quit now\n')
+        sAnswer3 = input('Please select what you want to do with {} ({}) [1]: '.format(device['ip_address'], device['name_of_station']))
         if sAnswer3.lower() == 'q': sys.exit()
         #if sAnswer3.lower() == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
         if sAnswer3.lower() == 'l': device = getInfo(device)
