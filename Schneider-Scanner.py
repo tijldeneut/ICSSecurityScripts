@@ -1,6 +1,6 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 '''
-    Copyright 2019 Deneut Tijl
+    Copyright 2021 Deneut Tijl
 
     Written for Howest(c) College University
 
@@ -17,14 +17,14 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.*)
 
-    It scans your local subnet for Schneider devices, still in beta...
+    It scans your local subnet for Schneider devices, still in beta.
 
-File name Schneider_Scanner.py
+File name Schneider_Scanner_v1.py
 written by tijl.deneut@howest.be
 '''
-import sys, socket, binascii, time, os, subprocess
+import socket, binascii, os, subprocess
 
-ssIP = '192.168.1.100'
+ssIP = '192.168.1.1'
 sSubnet = '255.255.255.0'
 iDPort = 1740
 iSPort = 1740 ## Official software also uses ports 1741 & 1742
@@ -34,7 +34,7 @@ def send_and_recv(s, ip, port, string):
     data = binascii.unhexlify(string)
     s.sendto(data, (ip, port))
     data, addr = s.recvfrom(1024)
-    print("received "+binascii.hexlify(data)+" from "+addr[0])
+    print(("received "+binascii.hexlify(data)+" from "+addr[0]))
     return data
 
 def send_only(s, ip, port, string):
@@ -51,17 +51,17 @@ def getAddresses():
         proc=subprocess.Popen("ipconfig | FINDSTR \"IPv4 Address Subnet\" | FINDSTR /V \"IPv6\"",shell=True,stdout=subprocess.PIPE)
         allines=proc.stdout.readlines()
         for i in range(0,len(allines),2):
-            ip = allines[i].split(':')[1].rstrip().lstrip()
-            mask = allines[i+1].split(':')[1].rstrip().lstrip()
-            interfaces.append((ip,mask))
+            ip = allines[i].split(b':')[1].rstrip().lstrip()
+            mask = allines[i+1].split(b':')[1].rstrip().lstrip()
+            interfaces.append((ip.decode(),mask.decode()))
     else: # And this on any Linux
         proc=subprocess.Popen("ip address | grep inet | grep -v \"127.0.0.1\" | grep -v \"inet6\"", shell=True, stdout=subprocess.PIPE)
         for interface in proc.stdout.readlines():
-            ip = interface.lstrip().split(' ')[1].split('/')[0]
-            cidr = int(interface.lstrip().split(' ')[1].split('/')[1])
+            ip = interface.lstrip().split(b' ')[1].split(b'/')[0]
+            cidr = int(interface.lstrip().split(b' ')[1].split(b'/')[1])
             bcidr = (cidr*'1'+(32-cidr)*'0')
             mask = str(int(bcidr[:8],2)) + '.' + str(int(bcidr[8:16],2)) + '.' + str(int(bcidr[16:24],2)) + '.' + str(int(bcidr[24:],2))
-            interfaces.append((ip,mask))
+            interfaces.append((ip.decode(),mask))
     return interfaces
 
 #### MAIN PROGRAM ####
@@ -70,10 +70,11 @@ os.system('cls' if os.name == 'nt' else 'clear')
 i=1
 arrInterfaces=getAddresses()
 for interface in arrInterfaces:
-    print('['+str(i)+'] '+interface[0]+' / '+interface[1])
+    print(('[{}] {} / {}'.format(i, interface[0], interface[1])))
+    #print(('['+str(i)+'] '+interface[0]+' / '+interface[1]))
     i+=1
 print('[Q] Quit now')
-if i>2: answer=raw_input('Please select the adapter [1]: ')
+if i>2: answer=input('Please select the adapter [1]: ')
 else: answer=str(i-1)
 if answer.lower()=='q': exit()
 if answer=='' or not answer.isdigit() or int(answer)>=i: answer=1
@@ -103,25 +104,25 @@ sBroadcast += str(int(ssIP.split('.')[1]) | 255-int(sSubnet.split('.')[1])) + '.
 sBroadcast += str(int(ssIP.split('.')[2]) | 255-int(sSubnet.split('.')[2])) + '.'
 sBroadcast += str(int(ssIP.split('.')[3]) | 255-int(sSubnet.split('.')[3]))
 
-print('Sending the discovery packets and waiting ' + str(iTimeout) + ' seconds for answers...')
+print('Sending the discovery packets and waiting {} seconds for answers...'.format(iTimeout))
 send_only(sock, sBroadcast, iDPort, data)
 receivedData = []
 while True:
     try: receivedData.append(recv_only(sock))
     except: break
-print("Got "+str(len(receivedData)-1)+" response(s):")
+print(('Got {} response(s): '.format(len(receivedData)-1)))
 for data in receivedData:
     if not data[1][0] == ssIP:
         ip = data[1][0]
-        print('Answer from IP '+ip)
+        print(('Answer from IP {}'.format(ip)))
         hexdata = binascii.hexlify(data[0])
         ## splitting with offset, no idea if this is correct ...
         if len(hexdata)> 100:
-            firmware = str(int(hexdata[102:104],16)) + '.' + str(int(hexdata[100:102],16)) + '.'
-            firmware += str(int(hexdata[98:100],16)) + '.' + str(int(hexdata[96:98],16))
+            #firmware = '{}.{}.{}.{}'.format(int(hexdata[102:104],16), int(hexdata[100:102],16), int(hexdata[98:100],16), int(hexdata[96:98],16))
+            firmware = '.'.join((str(int(hexdata[102:104],16)), str(int(hexdata[100:102],16)), str(int(hexdata[98:100],16)), str(int(hexdata[96:98],16))))
             device = hexdata[104:]
-            device = binascii.unhexlify(device).replace('\x00\x00',' ').replace('\x00','')
-            print('The device identifies as '+device)
-            print(' with firmware '+firmware)
+            device = binascii.unhexlify(device).replace(b'\x00\x00',b' ').replace(b'\x00',b'')
+            print('The device identifies as: {}'.format(device.decode()))
+            print(' with firmware version: {}'.format(firmware))
     
-raw_input("press enter")
+input('press enter')
