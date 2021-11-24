@@ -20,7 +20,7 @@
 File name eWon_Scanner.py
 written by tijl.deneut@howest.be
 '''
-import sys, socket, binascii, time, os, subprocess
+import socket, binascii, os, subprocess
 
 sdIP = '172.20.1.1'
 ssIP = '172.20.0.10'
@@ -69,10 +69,14 @@ def parseData(bResp):
     netmask = '.'.join((str(bResp[27]), str(bResp[26]), str(bResp[25]), str(bResp[24])))
     mac = ':'.join((fromhex(bResp[32]), fromhex(bResp[33]), fromhex(bResp[34]), fromhex(bResp[35]), fromhex(bResp[36]), fromhex(bResp[37])))
     token = bResp[16:20].hex()
-    pcode = str(bResp[16])
-    serial = str(bResp[19]) + str(bResp[19]) + '-'
-    serial += str(int('1'+fromhex(bResp[17]),16)).zfill(4) + '-'
-    serial += str(pcode)
+    pcode = str(bResp[16]) ## This identifies the product
+
+    serialp1 = str(bResp[19])
+    serialp2 = str(int(int((bResp[18:19] + bResp[17:18]).hex(),16)/1000))
+    serialp3 = bResp[17]
+    if int((bResp[18:19] + bResp[17:18]).hex(), 16) % 1000  >= 500: serialp3 += 0x100
+    serialp4 = bResp[16]
+    serial = '{}{}-{}-{}'.format(serialp1,serialp2,str(serialp3).zfill(4),serialp4)
     return ip, netmask, mac, token, serial, pcode
 
 ###MAIN###
