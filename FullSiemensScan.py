@@ -838,7 +838,7 @@ if len(getAllInterfaces()) > 1:
     print('[Q] Quit now')
     sAnswer1 = input('Please select the adapter [1]: ')
     if sAnswer1.lower() == 'q': sys.exit()
-    if sAnswer1 == '' or not sAnswer1.isdigit() or int(sAnswer1) >= len(arrInterfaces): sAnswer1 = 1
+    if sAnswer1 == '' or not sAnswer1.isdigit() or int(sAnswer1) > len(arrInterfaces): sAnswer1 = 1
 else:
     sAnswer1 = 1
 
