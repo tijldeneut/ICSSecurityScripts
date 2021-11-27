@@ -82,14 +82,14 @@ if os.name == 'nt':
         _lib = CDLL('wpcap.dll')
     except:
         print('Error: WinPcap/Npcap not found!')
-        print('Please download here: https://www.winpcap.org/install')
+        print('Please download here: https://nmap.org/npcap/')
         input('Press [Enter] to close')
         sys.exit(1)
 else:
     pcaplibrary = find_library('pcap')
     if pcaplibrary == None or str(pcaplibrary) == '':
         print('Error: Pcap library not found!')
-        print('Please install with: e.g. apt-get install libpcap0.8')
+        print('Please install with: e.g. apt install libpcap0.8')
         input('Press [Enter] to close')
         sys.exit(1)
     _lib = CDLL(pcaplibrary)
@@ -647,19 +647,19 @@ def manageOutputs(device):
                 print('S7Comm (Siemens) detected, getting outputs...')
                 boolAlive = getS7GetCoils(device['ip_address'])
                 if boolAlive:
-                    ans = input('Do you want to alter outputs, memory or Not? [o/m/N]: ')
-                    if ans.lower() == 'o':
+                    ans = input('Do you want to alter outputs, memory or Not? [o/m/N]: ').lower()
+                    if ans == 'o':
                         array = input('What outputs to set please? [00000000]: ')
                         setOutputs(device['ip_address'], 102, array)
                         status = 'Output has been send to device, verifying results: '
-                    if ans.lower() == 'm':
+                    if ans == 'm':
                         array = input('What memory merkers + offset to set please? [00000000,0]: ')
                         offset = int(array.split(',')[1])
                         array = array.split(',')[0]
                         setMerkers(device['ip_address'], 102, array, offset)
                         status = 'Merkers have been send to device, verifying results: '
                     
-                    if ans.lower() == 'n' or ans.lower() == '': return 0
+                    if ans == 'n' or ans == '': return 0
                 else: break
         if not boolAlive: break
     input('Press [Enter] to return to the device menu')
@@ -721,8 +721,8 @@ def manageCPU(device):
         if not boolWorked: print('CPU flip seems to have failed, is this a PLC SIM?')
         print('     ###--- Manage CPU ---###\n')
         print('Current CPU state: '+getCPU(device))
-        ans = input('Do you want to flip CPU state? [y/N]: ')
-        if ans.lower() == 'y':
+        ans = input('Do you want to flip CPU state? [y/N]: ').lower()
+        if ans == 'y':
             print('This will take some seconds ...')
             boolWorked = changeCPU(device)
         else:
@@ -794,21 +794,45 @@ def changeCPU(device):
     sock.close()
     return True
 
-def addDevice(arrDevices):
+def scanNetwork(sAdapter, sMacaddr, sWinguid):
+    ## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
+    if os.name == 'nt': sAdapter = r'\Device\NPF_' + sWinguid
+    print('Using adapter ' + sAdapter + '\n')
+    bNpfdevice = sAdapter.encode()
+
+    ## Start building discovery packet
+    print('Building packet')
+
+    ## Sending the raw packet (packet itself is returned) (8100 == PN_DCP, 88cc == LDP)
+    packet = sendRawPacket(bNpfdevice, '8100', sMacaddr)
+    print('\nPacket has been sent (' + str(len(packet)) + ' bytes)')
+
+    ## Receiving packets as bytearr (88cc == LDP, 8892 == device PN_DCP)
+    print('\nReceiving packets over ' + str(iDiscoverTimeout) + ' seconds ...\n')
+    receivedDataArr = receiveRawPackets(bNpfdevice, iDiscoverTimeout, sMacaddr, '8892')
+    print()
+    print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
+    print()
+    return receivedDataArr
+
+def parseData():
+    return
+
+def addDevice():
     sIP = input('Please enter IP to add: ')
-    arrDevice = {}
-    arrDevice['mac_address'] = 'UNK'
-    arrDevice['type_of_station'] = 'None'
-    arrDevice['name_of_station'] = 'None'
-    arrDevice['vendor_id'] = 'None'
-    arrDevice['device_id'] = 'None'
-    arrDevice['device_role'] = 'None'
-    arrDevice['ip_address'] = sIP
-    arrDevice['subnet_mask'] = 'None'
-    arrDevice['standard_gateway'] = 'None'
-    arrDevice['hardware'] = None
-    arrDevice['firmware'] = None
-    return arrDevice
+    return {
+        'mac_address':'UNK',
+        'type_of_station':'None',
+        'name_of_station':'None',
+        'vendor_id':'None',
+        'device_id':'None',
+        'device_role':'None',
+        'ip_address':sIP,
+        'subnet_mask':'None',
+        'standard_gateway':'None',
+        'hardware':None,
+        'firmware':None
+    }
     
 ##### The Actual Program
 ## The Banner
@@ -836,8 +860,8 @@ arrInterfaces = getAllInterfaces()
 if len(getAllInterfaces()) > 1:
     for iNr, arrInterface in enumerate(arrInterfaces): print('[' + str(iNr + 1) + '] ' + arrInterface[2] + ' has ' + arrInterface[1] + ' (' + arrInterface[0] + ')')
     print('[Q] Quit now')
-    sAnswer1 = input('Please select the adapter [1]: ')
-    if sAnswer1.lower() == 'q': sys.exit()
+    sAnswer1 = input('Please select the adapter [1]: ').lower()
+    if sAnswer1 == 'q': sys.exit()
     if sAnswer1 == '' or not sAnswer1.isdigit() or int(sAnswer1) > len(arrInterfaces): sAnswer1 = 1
 else:
     sAnswer1 = 1
@@ -847,6 +871,9 @@ sAdapter = arrInterfaces[int(sAnswer1) - 1][0]                  # eg: 'Ethernet 
 sMacaddr = arrInterfaces[int(sAnswer1) - 1][2].replace(':', '') # eg: 'ab58e0ff585a'
 sWinguid = arrInterfaces[int(sAnswer1) - 1][4]                  # eg: '{875F7EDB-CA23-435E-8E9E-DFC9E3314C55}'
 
+receivedDataArr = scanNetwork(sAdapter, sMacaddr, sWinguid)
+
+r'''
 ## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
 sNpfdevice = sAdapter
 if os.name == 'nt': sNpfdevice = r'\Device\NPF_' + sWinguid
@@ -866,13 +893,13 @@ receivedDataArr = receiveRawPackets(bNpfdevice, iDiscoverTimeout, sMacaddr, '889
 print()
 print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
 print()
-
+'''
 ## Now we parse:
 #if len(receivedDataArr) == 0:
 #    print('No devices found, ending it...')
 #    endIt()
 
-print('These are the devices detected (' + str(len(receivedDataArr)) + '):')
+print('These are the devices detected ({}):'.format(len(receivedDataArr)))
 print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
 arrDevices = []
 for packet in receivedDataArr:
@@ -897,12 +924,16 @@ while True:
     for iNr, arrDevice in enumerate(arrDevices):
         print('[' + str(iNr + 1) + '] ' + arrDevice['mac_address'] + ' (' + arrDevice['ip_address'] + ', '+ arrDevice['type_of_station'] + ', ' + arrDevice['name_of_station'] + ') ')
     print('[A] Manually add new device by IP')
+    print('[R] Rescan')
     print('[Q] Quit now')
-    sAnswer2 = input('Please select the option you want [1]: ')
-    if sAnswer2.lower() == 'q':
+    sAnswer2 = input('Please select the option you want [1]: ').lower()
+    if sAnswer2 == 'q':
         sys.exit()
-    elif sAnswer2.lower() == 'a':
-        device = addDevice(arrDevices)
+    elif sAnswer2 == 'r':
+        receivedDataArr = scanNetwork(sAdapter, sMacaddr, sWinguid)
+        continue
+    elif sAnswer2 == 'a':
+        device = addDevice()
     else:
         if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
         device = arrDevices[int(sAnswer2)-1]
@@ -919,15 +950,15 @@ while True:
         print()
         print('[O] Choose other device')
         print('[Q] Quit now\n')
-        sAnswer3 = input('Please select what you want to do with {} ({}) [1]: '.format(device['ip_address'], device['name_of_station']))
-        if sAnswer3.lower() == 'q': sys.exit()
-        #if sAnswer3.lower() == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
-        if sAnswer3.lower() == 'l': device = getInfo(device)
-        if sAnswer3.lower() == 'p': manageOutputs(device)
-        if sAnswer3.lower() == 'c': manageCPU(device)
-        if sAnswer3.lower() == 'f': flashLED(device, sMacaddr)
-        if sAnswer3.lower() == 'n': setStationName(device, bNpfdevice, sMacaddr)
-        if sAnswer3.lower() == 'o': break
-        if sAnswer3.lower() == '1' or sAnswer3 == '':
-            device = setNetwork(device, bNpfdevice, sMacaddr)
+        sAnswer3 = input('Please select what you want to do with {} ({}) [1]: '.format(device['ip_address'], device['name_of_station'])).lower()
+        if sAnswer3 == 'q': sys.exit()
+        #if sAnswer3 == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
+        if sAnswer3 == 'l': device = getInfo(device)
+        if sAnswer3 == 'p': manageOutputs(device)
+        if sAnswer3 == 'c': manageCPU(device)
+        if sAnswer3 == 'f': flashLED(device, sMacaddr)
+        if sAnswer3 == 'n': setStationName(device, sAdapter.encode(), sMacaddr)
+        if sAnswer3 == 'o': break
+        if sAnswer3 == '1' or sAnswer3 == '':
+            device = setNetwork(device, sAdapter.encode(), sMacaddr)
             arrDevices[int(sAnswer2)-1] = device
