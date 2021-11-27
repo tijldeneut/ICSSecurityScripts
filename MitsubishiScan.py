@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 '''
 	Copyright 2019 Photubias(c)
 
@@ -23,24 +23,29 @@
         --- Mitsubishi Scanner ---
         It uses the same scanning packets as used in the GX WorksV3 software
 '''
-import socket, binascii, os, subprocess
+import socket, os, subprocess
 
 def getAddresses():
     interfaces=[]
     if os.name == 'nt': # This should work on Windows
-        proc=subprocess.Popen("ipconfig | FINDSTR \"IPv4 Address\" | FINDSTR /V \"IPv6\"",shell=True,stdout=subprocess.PIPE)
-        for interface in proc.stdout.readlines():
-            ip = interface.split(':')[1].rstrip().lstrip()
-            interfaces.append(ip)
+        proc=subprocess.Popen("ipconfig | FINDSTR \"IPv4 Address Subnet\" | FINDSTR /V \"IPv6\"",shell=True,stdout=subprocess.PIPE)
+        allines=proc.stdout.readlines()
+        for i in range(0,len(allines),2):
+            ip = allines[i].split(b':')[1].rstrip().lstrip()
+            mask = allines[i+1].split(b':')[1].rstrip().lstrip()
+            interfaces.append((ip.decode(),mask.decode()))
     else: # And this on any Linux
         proc=subprocess.Popen("ip address | grep inet | grep -v \"127.0.0.1\" | grep -v \"inet6\"", shell=True, stdout=subprocess.PIPE)
         for interface in proc.stdout.readlines():
-            ip = interface.lstrip().split(' ')[1].split('/')[0]
-            interfaces.append(ip)
+            ip = interface.lstrip().split(b' ')[1].split(b'/')[0]
+            cidr = int(interface.lstrip().split(b' ')[1].split(b'/')[1])
+            bcidr = (cidr*'1'+(32-cidr)*'0')
+            mask = str(int(bcidr[:8],2)) + '.' + str(int(bcidr[8:16],2)) + '.' + str(int(bcidr[16:24],2)) + '.' + str(int(bcidr[24:],2))
+            interfaces.append((ip.decode(),mask))
     return interfaces
 
 def send_only(s, ip, port, string):
-    data = binascii.unhexlify(string.replace(' ',''))
+    data = bytes.fromhex(string.replace(' ',''))
     s.sendto(data, (ip, port))
 
 def recv_only(s):
@@ -67,21 +72,18 @@ def getDevices(sSrcIP, iTimeout):
     for data in receivedData:
         data,ip=data
         ## Retrieve CPU Title
+        bOptionalData = data.split(b'   ')[2]
         try:
-            sOptionalData = binascii.hexlify(data).split('202020')[2]
-            iLength1 = int(sOptionalData[:2],16)
-            sTitle = sOptionalData[12:12+(iLength1*2)].replace('00','')
-            sTitle = binascii.unhexlify(sTitle)
+            iLength1 = bOptionalData[0]
+            sTitle = bOptionalData[6:6+iLength1].decode('utf-16')
         except: sTitle = ''
         ## Retrieve Comment
         try:
-            sOptionalData = binascii.hexlify(data).split('202020')[2]
-            iLength2 = int(sOptionalData[4:6],16)
-            sComment = sOptionalData[12+iLength1*2:(12+iLength1*2)+(iLength2*2)].replace('00','')
-            sComment = binascii.unhexlify(sComment)
+            iLength2 = bOptionalData[2]
+            sComment = bOptionalData[6+iLength1:6+iLength1+iLength2].decode('utf-16')
         except: sComment = ''
         ## Retrieve Type
-        try: sType = binascii.unhexlify(binascii.hexlify(data).split('202020')[1].split('00')[0])
+        try: sType = data.split(b'   ')[1].decode()
         except: sType = 'Unknown'
         arrDevices.append({'IP':ip[0],'TYPE':sType,'TITLE':sTitle,'COMMENT':sComment})
     return arrDevices
@@ -90,23 +92,23 @@ def getDevices(sSrcIP, iTimeout):
 ## Select Adapter, IP does not have to be in the same subnet
 i=1
 arrInterfaces=getAddresses()
-for ip in arrInterfaces:
-    print('['+str(i)+'] '+ip)
+for interface in arrInterfaces:
+    print(('[{}] {} / {}'.format(i, interface[0], interface[1])))
     i+=1
 print('[Q] Quit now')
-if i>2: answer=raw_input('==> Please select the physical adapter to use [1]: ')
+if i>2: answer=input('Please select the adapter [1]: ')
 else: answer=str(i-1)
-if answer.lower()=='q': exit(0)
+if answer.lower()=='q': exit()
 if answer=='' or not answer.isdigit() or int(answer)>=i: answer=1
+sSrcAddr = arrInterfaces[int(answer)-1][0]
 
-sSrcAddr = arrInterfaces[int(answer)-1]
 print('[*] Sending the discovery packet and waiting 2 seconds for answers...')
 arrDevices=getDevices(sSrcAddr, 2)
-for Device in arrDevices:
+for arrDevice in arrDevices:
     sExtra = ''
-    if not Device['TITLE'] == '': sExtra = sExtra + 'CPU Title: ' + Device['TITLE']
-    if not Device['COMMENT'] == '': sExtra = sExtra + ', Comment: ' + Device['COMMENT']
-    print('[+] Found device at address '+Device['IP']+' with identifier '+Device['TYPE'] + '('+sExtra+')')
+    if not arrDevice['TITLE'] == '': sExtra = sExtra + 'CPU Title: ' + arrDevice['TITLE']
+    if not arrDevice['COMMENT'] == '': sExtra = sExtra + ', Comment: ' + arrDevice['COMMENT']
+    print('[+] Found device at IP address {} with identifier {} ({})'.format(arrDevice['IP'], arrDevice['TYPE'], sExtra))
 if len(arrDevices) == 0: print('[-] Too bad, no devices found')
-bla=raw_input('Press Enter To Close')
+bla=input('Press Enter To Close')
 exit(0)
