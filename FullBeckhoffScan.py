@@ -330,10 +330,13 @@ def getRemoteRoutes(oSock, lstDevice, LNETID, showme = True):
             else: iRouteIndex = -1
         
         ## Parse the route
-        lstAMSResponse = parseAMSResponse(bResp)
+        try: lstAMSResponse = parseAMSResponse(bResp)
+        except: lstAMSResponse = parseAMSResponse(recv_only(oSock)[0]) ## Todo: Older devices send two responses instead of one
         if not lstAMSResponse['ErrorCode'] == '00000000': raise Exception('[-] Error receiving route, error code: {}'.format(lstAMSResponse['ErrorCode']))
-        if not lstAMSResponse['InvokeID'] == sInvokeID: raise Exception('[-] Error receiving route, wrong Invoke ID: {}'.format(lstAMSResponse['InvokeID']))
-        lstADSData = parseADSResponse(lstAMSResponse['ADSData'])
+        if not lstAMSResponse['InvokeID'] == sInvokeID:  ## Todo: Older devices send two responses instead of one
+            lstAMSResponse = parseAMSResponse(recv_only(oSock)[0])
+        try: lstADSData = parseADSResponse(lstAMSResponse['ADSData']) ## Todo: Older devices send two responses instead of one
+        except: lstADSData = parseADSResponse(parseAMSResponse(recv_only(oSock)[0])['ADSData'])
         if not lstADSData['ErrorCode'] == '00000000': 
             if lstADSData['ErrorCode'] == '00000716': ## This code means "no more routes found"
                 iRouteIndex = -1 
