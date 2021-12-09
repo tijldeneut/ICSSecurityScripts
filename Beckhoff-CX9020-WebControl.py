@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2
 '''
     # Exploit Title: Beckhoff CX9020 CPU Module Web Exploit (RCE)
     # Date: 2015-10-22
