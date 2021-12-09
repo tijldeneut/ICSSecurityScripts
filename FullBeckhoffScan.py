@@ -175,7 +175,7 @@ def selectInterface(): #adapter[] = npfdevice, ip, mac
         print('[{}] {} has {} ({})'.format(i, lstInt[2], lstInt[1], lstInt[0]))
         i += 1
     if i > 2: sAnswer = input('[?] Please select the adapter [1]: ')
-    #sAnswer = '3'
+    else: sAnswer = None
     if not sAnswer or sAnswer == '' or not sAnswer.isdigit() or int(sAnswer) >= i: sAnswer = 1
     iAnswer = int(sAnswer) - 1
     sNPF = lstInterfaces[iAnswer][0]
