@@ -121,7 +121,7 @@ def endIt(sMessage=''):
     print()
     if sMessage: print(('Error message: '+sMessage))
     print('All done')
-    eval(input('Press ENTER to continue'))
+    input('Press ENTER to continue')
     exit()
 
 #### MAIN PROGRAM ####
