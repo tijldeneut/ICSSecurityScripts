@@ -221,7 +221,7 @@ def getResult(oSrcAdapter, sSrcIP, sTargetIP, RNETID):
     data = binascii.unhexlify(packet.replace(' ',''))
 
     oResp = spoofTCPPacket(oSrcAdapter, sSrcIP, sTargetIP, iPORT, data)
-    if(str(type(oResp))=="<type 'NoneType'>"):
+    if(str(type(oResp))=="<type 'NoneType'>" or not oResp):
         print('[-] Port closed, TwinCAT not running?')
         return False
     else: 
