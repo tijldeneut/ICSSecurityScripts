@@ -873,13 +873,13 @@ sWinguid = arrInterfaces[int(sAnswer1) - 1][4]                  # eg: '{875F7EDB
 
 receivedDataArr = scanNetwork(sAdapter, sMacaddr, sWinguid)
 
-r'''
+
 ## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
 sNpfdevice = sAdapter
 if os.name == 'nt': sNpfdevice = r'\Device\NPF_' + sWinguid
 print('Using adapter ' + sAdapter + '\n')
 bNpfdevice = sNpfdevice.encode()
-
+r'''
 ## Start building discovery packet
 print('Building packet')
 
