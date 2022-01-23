@@ -25,6 +25,8 @@
 '''
 import socket, os, subprocess
 
+_iTimeout = 2
+
 def getAddresses():
     interfaces=[]
     if os.name == 'nt': # This should work on Windows
@@ -33,15 +35,17 @@ def getAddresses():
         for i in range(0,len(allines),2):
             ip = allines[i].split(b':')[1].rstrip().lstrip()
             mask = allines[i+1].split(b':')[1].rstrip().lstrip()
-            interfaces.append((ip.decode(),mask.decode()))
+            interfaces.append((ip.decode(), mask.decode(), None))
     else: # And this on any Linux
         proc=subprocess.Popen("ip address | grep inet | grep -v \"127.0.0.1\" | grep -v \"inet6\"", shell=True, stdout=subprocess.PIPE)
         for interface in proc.stdout.readlines():
-            ip = interface.lstrip().split(b' ')[1].split(b'/')[0]
-            cidr = int(interface.lstrip().split(b' ')[1].split(b'/')[1])
+            int_parts = interface.lstrip().split(b' ')
+            ip = int_parts[1].split(b'/')[0]
+            cidr = int(int_parts[1].split(b'/')[1])
             bcidr = (cidr*'1'+(32-cidr)*'0')
             mask = str(int(bcidr[:8],2)) + '.' + str(int(bcidr[8:16],2)) + '.' + str(int(bcidr[16:24],2)) + '.' + str(int(bcidr[24:],2))
-            interfaces.append((ip.decode(),mask))
+            intname = int_parts[len(int_parts)-1].rstrip()
+            interfaces.append((ip.decode(),mask,intname))
     return interfaces
 
 def send_only(s, ip, port, string):
@@ -52,13 +56,18 @@ def recv_only(s):
     data, addr=s.recvfrom(1024)
     return data, addr
 
-def getDevices(sSrcIP, iTimeout):
+def recvOnly(s):
+    data, addr = s.recvfrom(1024)
+    return data, addr
+
+def getDevices(sSrcIP, bSrcDev, iTimeout):
     print('[*] Scanning for Devices')
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(iTimeout)
-    sock.bind((sSrcIP,0))
+    if os.name == 'nt': sock.bind((sSrcIP,0))
+    else: sock.setsockopt(socket.SOL_SOCKET, 25, bSrcDev)
     
     data='57010000001111070000ffff030000fe0300001e001c0a161400000000000000000000000000000000000000000b2001000000'
     send_only(sock, '255.255.255.255', 5561, data)
@@ -101,14 +110,15 @@ else: answer=str(i-1)
 if answer.lower()=='q': exit()
 if answer=='' or not answer.isdigit() or int(answer)>=i: answer=1
 sSrcAddr = arrInterfaces[int(answer)-1][0]
+bSrcDev = arrInterfaces[int(answer)-1][2]
 
-print('[*] Sending the discovery packet and waiting 2 seconds for answers...')
-arrDevices=getDevices(sSrcAddr, 2)
+print('[*] Sending the discovery packet and waiting {} seconds for answers...'.format(_iTimeout))
+arrDevices=getDevices(sSrcAddr, bSrcDev, _iTimeout)
 for arrDevice in arrDevices:
     sExtra = ''
     if not arrDevice['TITLE'] == '': sExtra = sExtra + 'CPU Title: ' + arrDevice['TITLE']
     if not arrDevice['COMMENT'] == '': sExtra = sExtra + ', Comment: ' + arrDevice['COMMENT']
     print('[+] Found device at IP address {} with identifier {} ({})'.format(arrDevice['IP'], arrDevice['TYPE'], sExtra))
 if len(arrDevices) == 0: print('[-] Too bad, no devices found')
-bla=input('Press Enter To Close')
+input('Press Enter To Close')
 exit(0)
