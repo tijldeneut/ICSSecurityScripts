@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 r'''
-	Copyright 2021 Photubias(c)
+	Copyright 2022 Photubias(c)
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@ r'''
         (Buggy) Linux implementation of this script: https://code.google.com/p/scada-tools/
         python profinet_scanner.py [-i interface]
 
-        I scrupulously used code from this script: https://code.google.com/p/winpcapy/
+        DLL Library import based on: https://code.google.com/p/winpcapy/
 
         Prerequisites: WinPcap (Windows) or libpcap (Linux) installed
         
@@ -32,7 +32,6 @@ r'''
         --- Siemens Hacker ---
         It also performs detailed scanning using S7Comm.
         Furthermore, this script reads inputs AND writes & reads outputs.
-        (For now only S7-1200 with Basic Firmware <= 3 is tested)
 '''
 import os, sys, re, time, string, struct, socket
 from subprocess import Popen, PIPE
@@ -40,12 +39,6 @@ from multiprocessing.pool import ThreadPool
 from binascii import hexlify, unhexlify
 from ctypes import CDLL, POINTER, Structure, c_void_p, c_char_p, c_ushort, c_char, c_long, c_int, c_uint, c_ubyte, byref, create_string_buffer
 from ctypes.util import find_library
-try:
-    import s7, modbus
-    s7present = True
-except:
-    s7present = False
-    pass
 
 ##### Classes
 class sockaddr(Structure):
@@ -228,7 +221,7 @@ def receiveRawPackets(bNpfdevice, iTimeout, sSrcmac, sEthertype, stopOnReceive =
     bufErrbuf = create_string_buffer(256)
     handlePcapDev = pcap_open_live(bNpfdevice, 65535, 1, 1000, bufErrbuf) ## Device, max packet size, promiscuous mode, time limit in ms, buffer for errors
     if not bool(handlePcapDev):
-        print('\nUnable to open the adapter. %s is not supported by Pcap\n' % bNpfdevice)
+        print('\nUnable to open the adapter. {} is not supported by Pcap\n'.format(bNpfdevice))
         sys.exit(1)
 
     ptrHeader = POINTER(pcap_pkthdr)()
@@ -326,16 +319,10 @@ def scanPort(ip, port):
         return ''
     return port
 
-def tcpScan(device, scanOnly = False):
+def tcpScan(device):
     openports = []
-    if scanPort(device['ip_address'], 102) == 102:
-        openports.append(102)
-        if not scanOnly:
-            s7.Scan(device['ip_address'], 102)
-    if scanPort(device['ip_address'], 502) == 502:
-        openports.append(502)
-        if not scanOnly:
-            modbus.Scan(device['ip_address'], 502)
+    if scanPort(device['ip_address'], 102) == 102: openports.append(102)
+    if scanPort(device['ip_address'], 502) == 502: openports.append(502)
     device['open_ports'] = openports
     return device
 
@@ -375,14 +362,10 @@ def getInfo(device):
     print('Standard Gateway: ' + device['standard_gateway'])
     print()
     ## TCP port scan
-    if s7present:
-        print('------ INFORMATION GATHERED THROUGH TCPIP (plcscan) -------')
-        device = tcpScan(device)
-    else:
-        print('------ INFORMATION GATHERED THROUGH TCPIP (DIRECT) --------')
-        getInfoViaCOTP(device)
-        print('')
-        print(' --> CPU State: ' + getCPU(device) + '\n')
+    print('------ INFORMATION GATHERED THROUGH TCPIP --------')
+    getInfoViaCOTP(device)
+    print('')
+    print(' --> CPU State: ' + getCPU(device) + '\n')
     input('Press [Enter] to return to the menu')
     return device
 
@@ -437,19 +420,23 @@ def setNetwork(device, npfdevice, srcmac):
     time.sleep(1) # Wait for response to return
 
     ## Check if response is OK
-    data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
-    responsecode = data[36:40]
-    if responsecode == '0000':
-        print('Successfully set new networkdata!                     ')
-        device['ip_address'] = newip
-        device['subnet_mask'] = newsnm
-        device['standard_gateway'] = newgw
-    elif responsecode == '0600':
-        print('Error setting networkdata: device in operation.       ')
-    elif responsecode == '0300':
-        print('Error setting networkdata: function not implemented.  ')
-    else:
-        print('Undefined response (' + responsecode + '), please investigate.        ')
+    #data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
+    bResult = async_result.get()
+    if len(bResult)>0: 
+        data = hexlify(bytearray(bResult[0]))[28:].decode(errors='ignore')
+        responsecode = data[36:40]
+        if responsecode == '0000':
+            print('Successfully set new networkdata!                     ')
+            device['ip_address'] = newip
+            device['subnet_mask'] = newsnm
+            device['standard_gateway'] = newgw
+        elif responsecode == '0600':
+            print('Error setting networkdata: device in operation.       ')
+        elif responsecode == '0300':
+            print('Error setting networkdata: defined within project.  ')
+        else:
+            print('Undefined response (' + responsecode + '), please investigate.        ')
+    else: print('\nNo response: function not implemented')
     
     input('Press [Enter] to return to the device menu')
     return device
@@ -496,14 +483,18 @@ def setStationName(device, npfdevice, srcmac):
     sendRawPacket(npfdevice, '8892', srcmac, False, data.replace(' ',''), device['mac_address'].replace(':', ''))
 
     ## Check if response is OK
-    data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
-    responsecode = data[36:38]
-    if responsecode == '00':
-        print('Successfully set new Station Name to '+newname)
-        device['name_of_station']=newname
-    elif responsecode == '03':
-        print('Error setting Station Name: Name Not Accepted!')
-        print(data)
+    #data = hexlify(bytearray(async_result.get()[0]))[28:].decode(errors='ignore')
+    bResult = async_result.get()
+    if len(bResult)>0: 
+        data = hexlify(bytearray(bResult[0]))[28:].decode(errors='ignore')
+        responsecode = data[36:38]
+        if responsecode == '00':
+            print('Successfully set new Station Name to '+newname)
+            device['name_of_station']=newname
+        elif responsecode == '03':
+            print('Error setting Station Name: Name Not Accepted or defined within project.')
+            print(data)
+    else: print('\nNo response: function not implemented')
 
     input('Press [Enter] to return to the device menu')
     return device
@@ -639,7 +630,7 @@ def manageOutputs(device):
             ports = device['open_ports']
         except:
             print('Scanning the device first.')
-            device = tcpScan(device, True)
+            device = tcpScan(device)
             ports = device['open_ports']
         if len(ports) == 0: return 1
         for port in ports:
@@ -797,7 +788,7 @@ def changeCPU(device):
 def scanNetwork(sAdapter, sMacaddr, sWinguid):
     ## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
     if os.name == 'nt': sAdapter = r'\Device\NPF_' + sWinguid
-    print('Using adapter ' + sAdapter + '\n')
+    #print('Using adapter ' + sAdapter + '\n')
     bNpfdevice = sAdapter.encode()
 
     ## Start building discovery packet
@@ -813,10 +804,26 @@ def scanNetwork(sAdapter, sMacaddr, sWinguid):
     print()
     print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
     print()
-    return receivedDataArr
+    return receivedDataArr, bNpfdevice
 
-def parseData():
-    return
+def parseData(receivedDataArr):
+    #print('These are the devices detected ({}):'.format(len(receivedDataArr)))
+    #print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
+    lstDevices = []
+    for packet in receivedDataArr:
+        sHexdata = hexlify(bytearray(packet))[28:].decode(errors='ignore') # take off ethernet header
+        ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
+        ##  takes 'translate' as a parameter, which will add these parsings:
+        ##   (vendor id 002a == siemens) (device id 0a01=switch, 0202=simulator, 0203=s7-300 CP, 0101=s7-300 ...)
+        ##   (0x01==IO-Device, 0x02==IO-Controller, 0x04==IO-Multidevice, 0x08==PN-Supervisor), (0000 0001, 0000 0010, 0000 0100, 0000 1000)
+        ## Getting MAC address from packet, formatting with ':' in between
+        sMac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet)).decode(errors='ignore')[6*2:12*2])))[:-1]
+        arrResult = parseResponse(sHexdata, sMac)
+        lstDevices.append(arrResult)
+        #sDevicename = str(arrResult['name_of_station'])
+        #if sDevicename == '': sDevicename = str(arrResult['type_of_station'])
+        #print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(sMac, sDevicename, arrResult['type_of_station'], arrResult['ip_address'], arrResult['vendor_id']))
+    return lstDevices
 
 def addDevice():
     sIP = input('Please enter IP to add: ')
@@ -871,58 +878,19 @@ sAdapter = arrInterfaces[int(sAnswer1) - 1][0]                  # eg: 'Ethernet 
 sMacaddr = arrInterfaces[int(sAnswer1) - 1][2].replace(':', '') # eg: 'ab58e0ff585a'
 sWinguid = arrInterfaces[int(sAnswer1) - 1][4]                  # eg: '{875F7EDB-CA23-435E-8E9E-DFC9E3314C55}'
 
-receivedDataArr = scanNetwork(sAdapter, sMacaddr, sWinguid)
+## Get Raw Data
+receivedDataArr, bNpfdevice = scanNetwork(sAdapter, sMacaddr, sWinguid)
 
-
-## We use Pcap, so we need the Pcap device (for Windows: \Device\NPF_{GUID}, for Linux: 'eth0')
-sNpfdevice = sAdapter
-if os.name == 'nt': sNpfdevice = r'\Device\NPF_' + sWinguid
-print('Using adapter ' + sAdapter + '\n')
-bNpfdevice = sNpfdevice.encode()
-r'''
-## Start building discovery packet
-print('Building packet')
-
-## Sending the raw packet (packet itself is returned) (8100 == PN_DCP, 88cc == LDP)
-packet = sendRawPacket(bNpfdevice, '8100', sMacaddr)
-print('\nPacket has been sent (' + str(len(packet)) + ' bytes)')
-
-## Receiving packets as bytearr (88cc == LDP, 8892 == device PN_DCP)
-print('\nReceiving packets over ' + str(iDiscoverTimeout) + ' seconds ...\n')
-receivedDataArr = receiveRawPackets(bNpfdevice, iDiscoverTimeout, sMacaddr, '8892')
-print()
-print('\nSaved ' + str(len(receivedDataArr)) + ' packets')
-print()
-'''
-## Now we parse:
-#if len(receivedDataArr) == 0:
-#    print('No devices found, ending it...')
-#    endIt()
-
-print('These are the devices detected ({}):'.format(len(receivedDataArr)))
-print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
-arrDevices = []
-for packet in receivedDataArr:
-    sHexdata = hexlify(bytearray(packet))[28:].decode(errors='ignore') # take off ethernet header
-    ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
-    ##  takes 'translate' as a parameter, which will add these parsings:
-    ##   (vendor id 002a == siemens) (device id 0a01=switch, 0202=simulator, 0203=s7-300 CP, 0101=s7-300 ...)
-    ##   (0x01==IO-Device, 0x02==IO-Controller, 0x04==IO-Multidevice, 0x08==PN-Supervisor), (0000 0001, 0000 0010, 0000 0100, 0000 1000)
-    ## Getting MAC address from packet, formatting with ':' in between
-    sMac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet)).decode(errors='ignore')[6*2:12*2])))[:-1]
-    arrResult = parseResponse(sHexdata, sMac)
-    arrDevices.append(arrResult)
-    sDevicename = str(arrResult['name_of_station'])
-    if sDevicename == '': sDevicename = str(arrResult['type_of_station'])
-    print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(sMac, sDevicename, arrResult['type_of_station'], arrResult['ip_address'], arrResult['vendor_id']))
+## Parse into devices
+lstDevices = parseData(receivedDataArr)
 
 ## Finished the scanning part, now the changing part
-#input('Press ENTER to clear screen and continue with these ' + str(len(arrDevices)) + ' devices.')
+#input('Press ENTER to clear screen and continue with these ' + str(len(lstDevices)) + ' devices.')
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('      ###--- DEVICELIST ---###')
-    for iNr, arrDevice in enumerate(arrDevices):
-        print('[' + str(iNr + 1) + '] ' + arrDevice['mac_address'] + ' (' + arrDevice['ip_address'] + ', '+ arrDevice['type_of_station'] + ', ' + arrDevice['name_of_station'] + ') ')
+    for iNr, arrDevice in enumerate(lstDevices):
+        print('[' + str(iNr + 1).zfill(2) + '] ' + arrDevice['mac_address'] + ' (' + arrDevice['ip_address'] + ', '+ arrDevice['type_of_station'] + ', ' + arrDevice['name_of_station'] + ') ')
     print('[A] Manually add new device by IP')
     print('[R] Rescan')
     print('[Q] Quit now')
@@ -930,13 +898,14 @@ while True:
     if sAnswer2 == 'q':
         sys.exit()
     elif sAnswer2 == 'r':
-        receivedDataArr = scanNetwork(sAdapter, sMacaddr, sWinguid)
+        receivedDataArr, bNpfdevice = scanNetwork(sAdapter, sMacaddr, sWinguid)
+        parseData(receivedDataArr)
         continue
     elif sAnswer2 == 'a':
         device = addDevice()
     else:
-        if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(arrDevices): sAnswer2 = 1
-        device = arrDevices[int(sAnswer2)-1]
+        if sAnswer2 == '' or not sAnswer2.isdigit() or int(sAnswer2) > len(lstDevices): sAnswer2 = 1
+        device = lstDevices[int(sAnswer2)-1]
     ## We have the device, now what to do with it?
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -952,13 +921,12 @@ while True:
         print('[Q] Quit now\n')
         sAnswer3 = input('Please select what you want to do with {} ({}) [1]: '.format(device['ip_address'], device['name_of_station'])).lower()
         if sAnswer3 == 'q': sys.exit()
-        #if sAnswer3 == 'l': arrDevices[int(sAnswer2)-1] = getInfo(device)
         if sAnswer3 == 'l': device = getInfo(device)
         if sAnswer3 == 'p': manageOutputs(device)
         if sAnswer3 == 'c': manageCPU(device)
         if sAnswer3 == 'f': flashLED(device, sMacaddr)
-        if sAnswer3 == 'n': setStationName(device, sAdapter.encode(), sMacaddr)
+        if sAnswer3 == 'n': setStationName(device, bNpfdevice, sMacaddr)
         if sAnswer3 == 'o': break
         if sAnswer3 == '1' or sAnswer3 == '':
-            device = setNetwork(device, sAdapter.encode(), sMacaddr)
-            arrDevices[int(sAnswer2)-1] = device
+            device = setNetwork(device, bNpfdevice, sMacaddr)
+            lstDevices[int(sAnswer2)-1] = device
