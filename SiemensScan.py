@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 r'''
-	Copyright 2022 Photubias(c)
+	Copyright 2025 Photubias(c)
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@ r'''
         Prerequisites: WinPcap (Windows) or libpcap (Linux) installed
         
         File name SiemensScan.py
-        written by tijl[dot]deneut[at]howest[dot]be for IC4
+        written by Photubias (deneut_tijl[at]hotmail[dot]com)
         --- Profinet Scanner ---
         It will perform a Layer2 discovery scan (PN_DCP) for Profinet devices,
         then list their info (detected only via DCP)
@@ -42,8 +42,8 @@ from ctypes.util import find_library
 
 ##### Classes
 class sockaddr(Structure):
-    _fields_ = [("sa_family", c_ushort),
-                ("sa_data", c_char * 14)]
+    _fields_ = [('sa_family', c_ushort),
+                ('sa_data', c_char * 14)]
 class pcap_addr(Structure):
     pass
 pcap_addr._fields_ = [('next', POINTER(pcap_addr)),
@@ -371,7 +371,7 @@ def getInfo(device):
 
 def isIpv4(ip):
     if ip == '0.0.0.0': return True
-    match = re.match("^(\d{0,3})\.(\d{0,3})\.(\d{0,3})\.(\d{0,3})$", ip)
+    match = re.match(r'^(\d{0,3})\.(\d{0,3})\.(\d{0,3})\.(\d{0,3})$', ip)
     if not match:
         return False
     quad = []
@@ -640,14 +640,18 @@ def manageOutputs(device):
                 if boolAlive:
                     ans = input('Do you want to alter outputs, memory or Not? [o/m/N]: ').lower()
                     if ans == 'o':
-                        array = input('What outputs to set please? [00000000]: ')
+                        array = input('What outputs to set please? [00000000]: ').ljust(8,'0')
                         setOutputs(device['ip_address'], 102, array)
                         status = 'Output has been send to device, verifying results: '
                     if ans == 'm':
                         array = input('What memory merkers + offset to set please? [00000000,0]: ')
-                        offset = int(array.split(',')[1])
-                        array = array.split(',')[0]
-                        setMerkers(device['ip_address'], 102, array, offset)
+                        if ',' in array: 
+                            offset = int(array.split(',')[1])
+                            merkers = array.split(',')[0].ljust(8,'0')
+                        else: 
+                            offset = 0
+                            merkers = array.ljust(8,'0')
+                        setMerkers(device['ip_address'], 102, merkers, offset)
                         status = 'Merkers have been send to device, verifying results: '
                     
                     if ans == 'n' or ans == '': return 0
@@ -809,7 +813,7 @@ def scanNetwork(sAdapter, sMacaddr, sWinguid):
 def parseData(receivedDataArr):
     #print('These are the devices detected ({}):'.format(len(receivedDataArr)))
     #print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
-    lstDevices = []
+    lstDevices = lstMACs = []
     for packet in receivedDataArr:
         sHexdata = hexlify(bytearray(packet))[28:].decode(errors='ignore') # take off ethernet header
         ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
@@ -819,7 +823,9 @@ def parseData(receivedDataArr):
         ## Getting MAC address from packet, formatting with ':' in between
         sMac = ':'.join(re.findall('(?s).{,2}', str(hexlify(bytearray(packet)).decode(errors='ignore')[6*2:12*2])))[:-1]
         arrResult = parseResponse(sHexdata, sMac)
-        lstDevices.append(arrResult)
+        if not sMac in lstMACs:
+            lstMACs.append(sMac)
+            lstDevices.append(arrResult)
         #sDevicename = str(arrResult['name_of_station'])
         #if sDevicename == '': sDevicename = str(arrResult['type_of_station'])
         #print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format(sMac, sDevicename, arrResult['type_of_station'], arrResult['ip_address'], arrResult['vendor_id']))
@@ -844,7 +850,7 @@ def addDevice():
 ##### The Actual Program
 ## The Banner
 #os.system('cls' if os.name == 'nt' else 'clear')
-print("""
+print(r"""
 [*****************************************************************************]
                    This script works on both Linux and Windows
                    
@@ -854,8 +860,8 @@ print("""
      Then give you the option to change network settings for any of them
 
                             --- Siemens Hacker ---
-              It also performs detailed scanning using S7Comm.
-        Furthermore, this script reads inputs AND writes & reads outputs.
+              It also performs detailed scanning using S7Comm
+        Furthermore, this script reads inputs AND writes & reads outputs
             (For now only S7-1200 with Basic Firmware <= 3 is tested)
                             
 
