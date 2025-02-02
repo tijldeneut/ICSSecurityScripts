@@ -813,7 +813,8 @@ def scanNetwork(sAdapter, sMacaddr, sWinguid):
 def parseData(receivedDataArr):
     #print('These are the devices detected ({}):'.format(len(receivedDataArr)))
     #print('{0:17} | {1:20} | {2:20} | {3:15} | {4:9}'.format('MAC address', 'Device', 'Device Type', 'IP Address', 'Vendor ID'))
-    lstDevices = lstMACs = []
+    lstDevices = []
+    lstMACs = []
     for packet in receivedDataArr:
         sHexdata = hexlify(bytearray(packet))[28:].decode(errors='ignore') # take off ethernet header
         ## Parse function returns type_of_station, name_of_station, vendor_id, device_id, device_role, ip_address, subnet_mask, standard_gateway
