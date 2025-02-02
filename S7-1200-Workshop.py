@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-'''
+r'''
 	Copyright 2021 Photubias(c)
 
         This program is free software: you can redistribute it and/or modify
@@ -37,7 +37,7 @@ iBUFFER = 4096
 ##### Functions
 def showBanner():
     os.system('cls' if os.name == 'nt' else 'clear')
-    print("""
+    print(r"""
 [*****************************************************************************]
                    This script works on both Linux and Windows
 
@@ -58,7 +58,7 @@ def finish(sMessage=''):
 def parseArgs():
     global sIP, iPort, sOutputs, sMerkers, iMerkerOffset, bRead
     def isIpv4(ip):
-        match = re.match("^(\d{0,3})\.(\d{0,3})\.(\d{0,3})\.(\d{0,3})$", ip)
+        match = re.match(r"^(\d{0,3})\.(\d{0,3})\.(\d{0,3})\.(\d{0,3})$", ip)
         if not match: return False
         quad = []
         for number in match.groups(): quad.append(int(number))
