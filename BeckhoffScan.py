@@ -222,8 +222,9 @@ def getDevices(LHOST, LNETID, _iTimeout):
 def getState(lstDevice, sLNETID):
     ## ADS Read State Request
     oSock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    oSock.connect((lstDevice['IP'], 48898))
     oSock.settimeout(_iTimeout)
+    try: oSock.connect((lstDevice['IP'], 48898))
+    except: return 'ERROR' ## Should not happen, but this means port TCP/48898 is closed
     
     sPacket = constructAMSPacket(lstDevice['RNETID'], sLNETID, 4, ())
     try: resp = binascii.hexlify(send_and_recv(oSock, sPacket))
